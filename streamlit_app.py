@@ -22,26 +22,49 @@ def fetch_vessels(api_url, query):
     """Fetch vessel list from Lambda API using a POST request with a SQL query."""
     try:
         headers = {'Content-Type': 'application/json'}
-        payload = {"sql_query": query} # This payload is correct for fetching vessel names
+        payload = {"sql_query": query}
+        
+        # Debug: Show what we're sending
+        st.write("**Debug - Payload being sent:**")
+        st.json(payload)
+        
         response = requests.post(api_url, data=json.dumps(payload), headers=headers)
+        
+        # Debug: Show response details
+        st.write(f"**Debug - Response Status Code:** {response.status_code}")
+        st.write(f"**Debug - Response Headers:** {dict(response.headers)}")
+        st.write(f"**Debug - Raw Response Text:** {response.text}")
+        
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching vessels: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Response content: {e.response.text}")
         return []
 
-def query_vessel_data(api_url, query_payload): # Reverted to accepting query_payload
+def query_vessel_data(api_url, sql_query_string):
     """Send SQL query to Lambda API and get results"""
     try:
         headers = {'Content-Type': 'application/json'}
-        # This payload structure is what you indicated was working previously
-        response = requests.post(api_url,
-                               data=json.dumps(query_payload),
-                               headers=headers)
+        payload = {"sql_query": sql_query_string}
+        
+        # Debug: Show what we're sending
+        st.write("**Debug - Export Payload being sent:**")
+        st.json(payload)
+        
+        response = requests.post(api_url, data=json.dumps(payload), headers=headers)
+        
+        # Debug: Show response details
+        st.write(f"**Debug - Export Response Status Code:** {response.status_code}")
+        st.write(f"**Debug - Export Response Text:** {response.text}")
+        
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error querying data: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Response content: {e.response.text}")
         return None
 
 def create_excel_download(data, filename):
@@ -80,16 +103,15 @@ with st.sidebar:
     st.header("API Configuration")
 
     # API URLs
-    # Use the same URL for both, as your Lambda handles queries
     vessel_api_url = st.text_input(
         "Vessel List API URL",
-        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/", # Pre-fill with your Lambda URL
+        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/",
         help="Lambda API endpoint that returns list of vessels"
     )
 
     query_api_url = st.text_input(
         "Data Query API URL",
-        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/", # Pre-fill with your Lambda URL
+        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/",
         help="Lambda API endpoint that executes SQL queries"
     )
 
@@ -105,6 +127,24 @@ ORDER BY vessel_name, date""",
         help="Use {vessel_names} placeholder for selected vessels"
     )
 
+# Test section - Let's test with your working query first
+st.header("🔧 Test Section")
+st.markdown("Let's test with your known working query first:")
+
+test_query = "SELECT vessel_name FROM hull_performance WHERE hull_roughness_power_loss IS NOT NULL OR hull_roughness_speed_loss IS NOT NULL GROUP BY 1;"
+
+if st.button("Test Known Working Query"):
+    if vessel_api_url:
+        with st.spinner("Testing known working query..."):
+            test_result = fetch_vessels(vessel_api_url, test_query)
+            if test_result:
+                st.success("✅ Test query worked!")
+                st.json(test_result)
+    else:
+        st.error("Please enter the API URL first")
+
+st.markdown("---")
+
 # Main content area
 col1, col2 = st.columns([1, 1])
 
@@ -116,17 +156,15 @@ with col1:
 
     if st.button("Fetch Vessels", disabled=not vessel_api_url):
         with st.spinner("Loading vessels..."):
-            # Pass the specific query to fetch_vessels
             vessels_data = fetch_vessels(vessel_api_url, vessel_name_query)
 
             if vessels_data:
                 # Your Lambda returns a list of objects like [{"vessel_name": "Vessel1"}]
-                # We need to extract just the vessel names for selection
                 extracted_vessel_names = []
                 for item in vessels_data:
                     if isinstance(item, dict) and 'vessel_name' in item:
                         extracted_vessel_names.append(item['vessel_name'])
-                    elif isinstance(item, str): # In case it returns just strings
+                    elif isinstance(item, str):
                         extracted_vessel_names.append(item)
 
                 st.session_state.vessels = extracted_vessel_names
@@ -152,9 +190,7 @@ with col2:
         # Vessel selection checkboxes
         st.subheader("Choose Vessels:")
 
-        # Handle different vessel data formats
         for i, vessel_name in enumerate(st.session_state.vessels):
-            # Checkbox for vessel selection
             is_selected = vessel_name in st.session_state.selected_vessels
             if st.checkbox(vessel_name, value=is_selected, key=f"vessel_{i}"):
                 if vessel_name not in st.session_state.selected_vessels:
@@ -178,7 +214,6 @@ if st.session_state.selected_vessels and base_query and query_api_url:
     with col3a:
         # Show query preview
         vessel_names_list = [f"'{name}'" for name in st.session_state.selected_vessels]
-
         vessel_names_str = ", ".join(vessel_names_list)
         preview_query = base_query.replace("{vessel_names}", vessel_names_str)
 
@@ -190,17 +225,7 @@ if st.session_state.selected_vessels and base_query and query_api_url:
 
     if export_button:
         with st.spinner("Querying data..."):
-            # Prepare query payload - REVERTED to the original structure
-            # This structure includes 'sql_query' at the top level,
-            # along with other keys that your Lambda might be ignoring or using.
-            query_payload = {
-                "sql_query": preview_query, # Ensure 'sql_query' is present and correct
-                "vessel_names": vessel_names_list,
-                "selected_vessels": st.session_state.selected_vessels
-            }
-
-            # Execute query
-            result_data = query_vessel_data(query_api_url, query_payload)
+            result_data = query_vessel_data(query_api_url, preview_query)
 
             if result_data:
                 st.success("✅ Data retrieved successfully!")
@@ -208,7 +233,7 @@ if st.session_state.selected_vessels and base_query and query_api_url:
                 # Show data preview
                 try:
                     if isinstance(result_data, list) and result_data:
-                        preview_df = pd.DataFrame(result_data[:5])  # Show first 5 rows
+                        preview_df = pd.DataFrame(result_data[:5])
                     elif isinstance(result_data, dict):
                         if 'data' in result_data:
                             preview_df = pd.DataFrame(result_data['data'][:5])
@@ -234,7 +259,6 @@ if st.session_state.selected_vessels and base_query and query_api_url:
 
                 except Exception as e:
                     st.error(f"Error processing data: {str(e)}")
-                    # Still show raw data
                     st.json(result_data)
 
 else:
@@ -254,44 +278,12 @@ with st.expander("📖 How to Use"):
     st.markdown("""
     ### Step-by-step Guide:
 
-    1. **Configure APIs**: In the sidebar, enter your Lambda API URLs
-       - Vessel List API: Should return a JSON array/object with vessel information
-       - Data Query API: Should accept JSON payload with SQL query and return data
-
-    2. **Set SQL Query**: Configure your base SQL query using `{vessel_names}` placeholder
-
-    3. **Load Vessels**: Click "Fetch Vessels" to get the list from your API
-
-    4. **Select Vessels**: Use checkboxes to select which vessels you want data for
-
-    5. **Export**: Click "Export Data" to run the query and download Excel file
-
-    ### API Requirements:
-
-    **Vessel List API Response Format:**
-    ```json
-    [
-        {"name": "Vessel1", "type": "Cargo"},
-        {"name": "Vessel2", "type": "Tanker"}
-    ]
-    ```
-
-    **Query API Request Format:**
-    ```json
-    {
-        "query": "SELECT * FROM vessel_data WHERE vessel_name IN ('Vessel1', 'Vessel2')",
-        "vessel_names": ["'Vessel1'", "'Vessel2'"],
-        "selected_vessels": [...]
-    }
-    ```
-
-    **Query API Response Format:**
-    ```json
-    [
-        {"vessel_name": "Vessel1", "date": "2024-01-01", "value": 100},
-        {"vessel_name": "Vessel2", "date": "2024-01-01", "value": 200}
-    ]
-    ```
+    1. **Test First**: Use the test section to verify your Lambda is working
+    2. **Configure APIs**: In the sidebar, enter your Lambda API URLs
+    3. **Set SQL Query**: Configure your base SQL query using `{vessel_names}` placeholder
+    4. **Load Vessels**: Click "Fetch Vessels" to get the list from your API
+    5. **Select Vessels**: Use checkboxes to select which vessels you want data for
+    6. **Export**: Click "Export Data" to run the query and download Excel file
     """)
 
 # Footer
