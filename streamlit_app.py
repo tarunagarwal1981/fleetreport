@@ -30,12 +30,14 @@ def fetch_vessels(api_url, query):
         st.error(f"Error fetching vessels: {str(e)}")
         return []
 
-def query_vessel_data(api_url, query_payload):
+def query_vessel_data(api_url, sql_query_string): # Changed parameter name for clarity
     """Send SQL query to Lambda API and get results"""
     try:
         headers = {'Content-Type': 'application/json'}
+        # The payload should ONLY contain 'sql_query' as per your Lambda
+        payload = {"sql_query": sql_query_string}
         response = requests.post(api_url,
-                               data=json.dumps(query_payload),
+                               data=json.dumps(payload), # Send the correct payload
                                headers=headers)
         response.raise_for_status()
         return response.json()
@@ -190,14 +192,8 @@ if st.session_state.selected_vessels and base_query and query_api_url:
     if export_button:
         with st.spinner("Querying data..."):
             # Prepare query payload for the main data query
-            query_payload = {
-                "sql_query": preview_query, # Your Lambda expects 'sql_query'
-                "vessel_names": vessel_names_list,
-                "selected_vessels": st.session_state.selected_vessels
-            }
-
-            # Execute query
-            result_data = query_vessel_data(query_api_url, query_payload)
+            # Pass only the preview_query string to query_vessel_data
+            result_data = query_vessel_data(query_api_url, preview_query)
 
             if result_data:
                 st.success("✅ Data retrieved successfully!")
