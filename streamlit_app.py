@@ -1,5 +1,5 @@
 import streamlit as st
-import boto3
+import requests
 import pandas as pd
 import json
 import io
@@ -18,89 +18,56 @@ if 'vessels' not in st.session_state:
 if 'selected_vessels' not in st.session_state:
     st.session_state.selected_vessels = []
 
-def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token=None, region='ap-south-1'):
-    """Invoke Lambda function directly using AWS SDK"""
+def make_api_request(api_url, query_payload, access_token=None):
+    """
+    Makes a POST request to the API URL with the given payload and optional access token.
+    """
     try:
-        # Create Lambda client
-        # Pass session_token if provided
-        client_config = {
-            'aws_access_key_id': aws_access_key,
-            'aws_secret_access_key': aws_secret_key,
-            'region_name': region
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
-        if aws_session_token:
-            client_config['aws_session_token'] = aws_session_token
+        
+        if access_token:
+            # Assuming it's a Bearer token or similar.
+            # If it's an API Gateway API Key, it might be 'x-api-key': access_token
+            headers['Authorization'] = f'Bearer {access_token}'
+            # Or if it's an API Gateway API Key:
+            # headers['x-api-key'] = access_token
+            
+        st.write("**Debug - Request Headers:**")
+        st.json(headers)
+        st.write("**Debug - Request Payload:**")
+        st.json(query_payload)
 
-        lambda_client = boto3.client('lambda', **client_config)
-        
-        # Invoke the function
-        response = lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
+        response = requests.post(
+            api_url,
+            json=query_payload, # Use json parameter for automatic serialization and Content-Type
+            headers=headers,
+            timeout=30
         )
+
+        st.write(f"**Debug - Response Status Code:** {response.status_code}")
+        st.write(f"**Debug - Raw Response Text:** {response.text}")
         
-        # Parse response
-        response_payload = json.loads(response['Payload'].read())
-        
-        if response.get('StatusCode') == 200:
-            # Check if the Lambda returned an error (e.g., from its own error handling)
-            if 'statusCode' in response_payload and response_payload['statusCode'] != 200:
-                st.error(f"Lambda returned an error: {response_payload.get('body', 'Unknown error')}")
-                return None
-            
-            # If body is a string, parse it (common for Lambda Function URLs or API Gateway)
-            if 'body' in response_payload:
-                if isinstance(response_payload['body'], str):
-                    try:
-                        return json.loads(response_payload['body'])
-                    except json.JSONDecodeError:
-                        # If it's a string but not JSON, return as is
-                        return response_payload['body']
-                else:
-                    return response_payload['body']
-            else:
-                # If no 'body' key, return the whole payload
-                return response_payload
-        else:
-            st.error(f"AWS invoke error (Status Code: {response.get('StatusCode')}): {response_payload}")
-            return None
-            
-    except Exception as e:
-        st.error(f"Error invoking Lambda: {str(e)}")
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error making API request: {str(e)}")
+        if hasattr(e, 'response') and e.response is not None:
+            st.error(f"Response content: {e.response.text}")
         return None
 
-def fetch_vessels(function_name, query, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetch vessel list from Lambda function using direct invoke"""
+def fetch_vessels(api_url, query, access_token):
+    """Fetch vessel list from Lambda API using a POST request with a SQL query."""
     payload = {"sql_query": query}
-    
-    st.write("**Debug - Payload being sent:**")
-    st.json(payload)
-    
-    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
-    
-    if result:
-        st.write("**Debug - Response received:**")
-        st.json(result)
-        return result
-    
-    return []
+    return make_api_request(api_url, payload, access_token)
 
-def query_vessel_data(function_name, sql_query_string, aws_access_key, aws_secret_key, aws_session_token):
-    """Send SQL query to Lambda function and get results"""
+def query_vessel_data(api_url, sql_query_string, access_token):
+    """Send SQL query to Lambda API and get results"""
     payload = {"sql_query": sql_query_string}
-    
-    st.write("**Debug - Export Payload being sent:**")
-    st.json(payload)
-    
-    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
-    
-    if result:
-        st.write("**Debug - Export Response received:**")
-        st.json(result)
-        return result
-    
-    return None
+    return make_api_request(api_url, payload, access_token)
 
 def create_excel_download(data, filename):
     """Convert data to Excel format for download"""
@@ -128,39 +95,31 @@ def create_excel_download(data, filename):
 
 # Main app
 st.title("🚢 Vessel Data Export Tool")
-st.markdown("Select vessels and export their data to Excel using direct Lambda invoke")
+st.markdown("Select vessels and export their data to Excel")
 
 # Sidebar for configuration
 with st.sidebar:
-    st.header("AWS Configuration")
+    st.header("API Configuration")
     
-    # AWS credentials
-    aws_access_key = st.text_input(
-        "AWS Access Key ID",
+    # API URLs
+    vessel_api_url = st.text_input(
+        "Vessel List API URL",
+        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/",
+        help="Lambda API endpoint that returns list of vessels"
+    )
+    
+    query_api_url = st.text_input(
+        "Data Query API URL",
+        value="https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/",
+        help="Lambda API endpoint that executes SQL queries"
+    )
+    
+    # Access Token input
+    access_token = st.text_input(
+        "Access Token (Optional)",
         type="password",
-        help="Your AWS Access Key ID"
+        help="If your Lambda Function URL or API Gateway requires an access token (e.g., API Key, Bearer Token)"
     )
-    
-    aws_secret_key = st.text_input(
-        "AWS Secret Access Key",
-        type="password",
-        help="Your AWS Secret Access Key"
-    )
-    
-    aws_session_token = st.text_input(
-        "AWS Session Token (Optional)",
-        type="password",
-        help="Required if using temporary credentials (e.g., from STS AssumeRole)"
-    )
-    
-    # Lambda function name (extract from URL)
-    function_name = st.text_input(
-        "Lambda Function Name",
-        value="",  # You'll need to provide your actual function name
-        help="The name of your Lambda function (not the URL)"
-    )
-    
-    st.info("💡 **Function Name**: You can find this in your AWS Lambda console. It's usually something like 'my-function-name', not the full ARN or URL.")
 
     # SQL Query Template
     st.header("SQL Query Configuration")
@@ -180,14 +139,14 @@ st.markdown("Let's test with your known working query:")
 
 test_query = "SELECT vessel_name FROM hull_performance WHERE hull_roughness_power_loss IS NOT NULL OR hull_roughness_speed_loss IS NOT NULL GROUP BY 1;"
 
-if st.button("Test Direct Lambda Invoke"):
-    if not all([aws_access_key, aws_secret_key, function_name]):
-        st.error("Please provide AWS credentials and function name")
+if st.button("Test API Connection"):
+    if not vessel_api_url:
+        st.error("Please provide the API URL.")
     else:
-        with st.spinner("Testing direct Lambda invoke..."):
-            test_result = fetch_vessels(function_name, test_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
+        with st.spinner("Testing API connection..."):
+            test_result = fetch_vessels(vessel_api_url, test_query, access_token)
             if test_result:
-                st.success("✅ Direct invoke worked!")
+                st.success("✅ API connection successful!")
                 st.json(test_result)
 
 st.markdown("---")
@@ -200,9 +159,9 @@ with col1:
 
     vessel_name_query = "select vessel_name from vessel_particulars"
 
-    if st.button("Fetch Vessels", disabled=not all([aws_access_key, aws_secret_key, function_name])):
+    if st.button("Fetch Vessels", disabled=not vessel_api_url):
         with st.spinner("Loading vessels..."):
-            vessels_data = fetch_vessels(function_name, vessel_name_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
+            vessels_data = fetch_vessels(vessel_api_url, vessel_name_query, access_token)
 
             if vessels_data:
                 extracted_vessel_names = []
@@ -249,7 +208,7 @@ with col2:
 # Query execution section
 st.header("3. Export Data")
 
-if st.session_state.selected_vessels and base_query and all([aws_access_key, aws_secret_key, function_name]):
+if st.session_state.selected_vessels and base_query and vessel_api_url:
     col3a, col3b = st.columns([3, 1])
 
     with col3a:
@@ -265,7 +224,7 @@ if st.session_state.selected_vessels and base_query and all([aws_access_key, aws
 
     if export_button:
         with st.spinner("Querying data..."):
-            result_data = query_vessel_data(function_name, preview_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
+            result_data = query_vessel_data(query_api_url, preview_query, access_token)
 
             if result_data:
                 st.success("✅ Data retrieved successfully!")
@@ -305,12 +264,8 @@ else:
         missing_items.append("Select vessels")
     if not base_query:
         missing_items.append("Configure SQL query")
-    if not aws_access_key:
-        missing_items.append("AWS Access Key")
-    if not aws_secret_key:
-        missing_items.append("AWS Secret Key")
-    if not function_name:
-        missing_items.append("Lambda Function Name")
+    if not vessel_api_url:
+        missing_items.append("Set API URL")
 
     if missing_items:
         st.warning(f"Please complete: {', '.join(missing_items)}")
@@ -320,26 +275,24 @@ with st.expander("📖 How to Use"):
     st.markdown("""
     ### Setup Requirements:
     
-    1. **AWS Credentials**: You need AWS Access Key ID and Secret Access Key with Lambda invoke permissions
-    2. **Lambda Function Name**: The actual function name (not the URL)
-    
-    ### Finding Your Lambda Function Name:
-    
-    1. Go to AWS Lambda Console
-    2. Find your function in the list
-    3. The function name is displayed (e.g., "my-vessel-query-function")
-    4. **Don't use** the full ARN or Function URL - just the name
+    1. **API URLs**: Enter your Lambda Function URLs.
+    2. **Access Token (Optional)**: If your Lambda Function URL or API Gateway requires an access token, enter it here.
+       - **Common types**:
+         - **API Key**: Often sent in `x-api-key` header.
+         - **Bearer Token**: Often sent in `Authorization: Bearer YOUR_TOKEN` header.
+       - The code currently assumes a `Bearer` token. If it's an `x-api-key`, you'll need to uncomment that line in `make_api_request`.
     
     ### Step-by-step Guide:
     
-    1. **Configure AWS**: Enter your AWS credentials and Lambda function name
-    2. **Test**: Use the test section to verify the connection works
-    3. **Set SQL Query**: Configure your base SQL query using `{vessel_names}` placeholder
-    4. **Load Vessels**: Click "Fetch Vessels" to get the list
-    5. **Select Vessels**: Use checkboxes to select vessels
-    6. **Export**: Click "Export Data" to run the query and download Excel file
+    1. **Configure APIs**: Enter your Lambda Function URLs in the sidebar.
+    2. **Enter Access Token**: If required, paste your access token into the "Access Token" field.
+    3. **Test**: Use the "Test API Connection" button to verify the connection.
+    4. **Set SQL Query**: Configure your base SQL query using `{vessel_names}` placeholder.
+    5. **Load Vessels**: Click "Fetch Vessels" to get the list.
+    6. **Select Vessels**: Use checkboxes to select vessels.
+    7. **Export**: Click "Export Data" to download Excel file.
     """)
 
 # Footer
 st.markdown("---")
-st.markdown("*Using AWS SDK for direct Lambda invoke*")
+st.markdown("*Built with Streamlit 🎈*")
