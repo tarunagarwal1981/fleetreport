@@ -7,7 +7,6 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font, Alignment
-from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
 from openpyxl.styles.colors import Color
 
 # Page configuration
@@ -85,61 +84,133 @@ def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session
     return []
 
 def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetch hull roughness power loss for selected vessels and process for report."""
+    """Fetch hull roughness power loss and ME SFOC for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
-    # Corrected way to format vessel names for SQL IN clause
     quoted_vessel_names = [f"'{name}'" for name in vessel_names]
     vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-    # Ensure the column name matches your database exactly
-    sql_query_string = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+    # --- Query 1: Hull Roughness Power Loss ---
+    sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
     
-    st.info(f"Generating report for {len(vessel_names)} vessels...")
-    st.code(sql_query_string, language="sql") # Show the query being sent
-
-    result = invoke_lambda_function(function_name, {"sql_query": sql_query_string}, aws_access_key, aws_secret_key, aws_session_token)
+    st.info(f"Fetching Hull Roughness data for {len(vessel_names)} vessels...")
+    st.code(sql_query_hull, language="sql")
     
-    if result:
+    hull_result = invoke_lambda_function(function_name, {"sql_query": sql_query_hull}, aws_access_key, aws_secret_key, aws_session_token)
+    
+    df_hull = pd.DataFrame()
+    if hull_result:
         try:
-            df = pd.DataFrame(result)
-            
-            # Ensure the column exists before renaming
-            if 'hull_rough_power_loss_pct_ed' in df.columns:
-                df = df.rename(columns={'hull_rough_power_loss_pct_ed': 'Hull Roughness Power Loss %'})
+            df_hull = pd.DataFrame(hull_result)
+            if 'hull_rough_power_loss_pct_ed' in df_hull.columns:
+                df_hull = df_hull.rename(columns={'hull_rough_power_loss_pct_ed': 'Hull Roughness Power Loss %'})
             else:
-                st.warning("Column 'hull_rough_power_loss_pct_ed' not found in Lambda response. Please check your query or Lambda output.")
-                # If the column is missing, create it with NaNs to avoid errors
-                df['Hull Roughness Power Loss %'] = pd.NA
-
-            # Add S. No. column
-            df.insert(0, 'S. No.', range(1, 1 + len(df)))
-            
-            # Add Hull Condition column
-            def get_hull_condition(value):
-                if pd.isna(value):
-                    return "N/A"
-                if value < 15:
-                    return "Good"
-                elif 15 <= value <= 25:
-                    return "Average"
-                else: # value > 25
-                    return "Poor"
-            
-            df['Hull Condition'] = df['Hull Roughness Power Loss %'].apply(get_hull_condition)
-
-            # Reorder columns for final display
-            df = df[['S. No.', 'vessel_name', 'Hull Condition', 'Hull Roughness Power Loss %']]
-            df = df.rename(columns={'vessel_name': 'Vessel Name'}) # Rename vessel_name after reordering
-
-            st.success("Report data retrieved and processed successfully!")
-            return df
+                st.warning("Column 'hull_rough_power_loss_pct_ed' not found in Lambda response for hull data.")
+                df_hull['Hull Roughness Power Loss %'] = pd.NA
+            df_hull = df_hull.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
-            st.error(f"Error processing report data: {str(e)}")
-            st.json(result) # Show raw result for debugging
-            return pd.DataFrame()
-    st.error("Failed to retrieve report data.")
+            st.error(f"Error processing hull data: {str(e)}")
+            st.json(hull_result)
+            df_hull = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve hull roughness data.")
+
+    # --- Query 2: ME SFOC ---
+    # Note: This query uses vessel_imo and joins with vessel_particulars.
+    # We need to ensure the selected vessel_names can be mapped to vessel_imo if not already in the data.
+    # For simplicity, assuming vessel_name is unique and can be used to filter directly if the Lambda supports it,
+    # or we might need to fetch IMO for selected vessels first.
+    # For now, let's adapt the query to filter by vessel_name if possible, or assume the Lambda handles the join.
+    # If your Lambda expects vessel_imo for this query, you'd need to fetch vessel_imo for selected vessel_names first.
+    
+    # Assuming your Lambda can handle filtering by vessel_name directly for this query,
+    # or that the join within the query will correctly filter based on the names.
+    # If not, you'd need a preliminary query to get IMO for selected vessel names.
+    
+    sql_query_me = f"""
+    SELECT
+        vp.vessel_name,
+        AVG(vps.me_sfoc) AS avg_me_sfoc
+    FROM
+        reporting_layer.digital_desk.vessel_performance_summary vps
+    JOIN
+        reporting_layer.vessel_datahub.vessel_particulars vp
+    ON
+        vps.vessel_imo = vp.vessel_imo
+    WHERE
+        vp.vessel_name IN ({vessel_names_list_str})
+        AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+        AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
+    GROUP BY
+        vp.vessel_name;
+    """
+    
+    st.info(f"Fetching ME SFOC data for {len(vessel_names)} vessels...")
+    st.code(sql_query_me, language="sql")
+
+    me_result = invoke_lambda_function(function_name, {"sql_query": sql_query_me}, aws_access_key, aws_secret_key, aws_session_token)
+
+    df_me = pd.DataFrame()
+    if me_result:
+        try:
+            df_me = pd.DataFrame(me_result)
+            if 'avg_me_sfoc' in df_me.columns:
+                df_me = df_me.rename(columns={'avg_me_sfoc': 'ME SFOC'})
+            else:
+                st.warning("Column 'avg_me_sfoc' not found in Lambda response for ME data.")
+                df_me['ME SFOC'] = pd.NA
+            df_me = df_me.rename(columns={'vessel_name': 'Vessel Name'})
+        except Exception as e:
+            st.error(f"Error processing ME data: {str(e)}")
+            st.json(me_result)
+            df_me = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve ME SFOC data.")
+
+    # --- Merge DataFrames ---
+    if not df_hull.empty and not df_me.empty:
+        # Merge on 'Vessel Name'
+        df_final = pd.merge(df_hull, df_me, on='Vessel Name', how='outer')
+    elif not df_hull.empty:
+        df_final = df_hull
+    elif not df_me.empty:
+        df_final = df_me
+    else:
+        st.warning("No data retrieved for either Hull Roughness or ME SFOC.")
+        return pd.DataFrame()
+
+    # --- Post-merge processing for final report ---
+    if not df_final.empty:
+        # Add S. No. column (after merge to ensure correct numbering)
+        df_final.insert(0, 'S. No.', range(1, 1 + len(df_final)))
+        
+        # Add Hull Condition column (re-apply in case of merge issues or missing data)
+        def get_hull_condition(value):
+            if pd.isna(value):
+                return "N/A"
+            if value < 15:
+                return "Good"
+            elif 15 <= value <= 25:
+                return "Average"
+            else: # value > 25
+                return "Poor"
+        
+        # Ensure 'Hull Roughness Power Loss %' exists before applying
+        if 'Hull Roughness Power Loss %' in df_final.columns:
+            df_final['Hull Condition'] = df_final['Hull Roughness Power Loss %'].apply(get_hull_condition)
+        else:
+            df_final['Hull Condition'] = "N/A" # Default if column is missing
+
+        # Reorder columns for final display: S. No., Vessel Name, Hull Condition, Hull Roughness, ME SFOC
+        final_columns = ['S. No.', 'Vessel Name', 'Hull Condition', 'Hull Roughness Power Loss %', 'ME SFOC']
+        # Filter to only include columns that actually exist in df_final
+        df_final = df_final[[col for col in final_columns if col in df_final.columns]]
+
+        st.success("Report data retrieved and processed successfully!")
+        return df_final
+    
+    st.error("Failed to retrieve or process report data.")
     return pd.DataFrame()
 
 # --- Styling for Streamlit DataFrame ---
