@@ -117,17 +117,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         st.error("Failed to retrieve hull roughness data.")
 
     # --- Query 2: ME SFOC ---
-    # Note: This query uses vessel_imo and joins with vessel_particulars.
-    # We need to ensure the selected vessel_names can be mapped to vessel_imo if not already in the data.
-    # For simplicity, assuming vessel_name is unique and can be used to filter directly if the Lambda supports it,
-    # or we might need to fetch IMO for selected vessels first.
-    # For now, let's adapt the query to filter by vessel_name if possible, or assume the Lambda handles the join.
-    # If your Lambda expects vessel_imo for this query, you'd need to fetch vessel_imo for selected vessel_names first.
-    
-    # Assuming your Lambda can handle filtering by vessel_name directly for this query,
-    # or that the join within the query will correctly filter based on the names.
-    # If not, you'd need a preliminary query to get IMO for selected vessel names.
-    
+    # Applying CAST to vessel_imo in the JOIN condition to resolve bigint = text error
     sql_query_me = f"""
     SELECT
         vp.vessel_name,
@@ -137,7 +127,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     JOIN
         vessel_particulars vp
     ON
-        vps.vessel_imo = vp.vessel_imo
+        vps.vessel_imo = CAST(vp.vessel_imo AS BIGINT) -- <--- Changed this line
     WHERE
         vp.vessel_name IN ({vessel_names_list_str})
         AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
