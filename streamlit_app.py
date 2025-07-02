@@ -127,7 +127,6 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     JOIN
         vessel_particulars vp
     ON
-
         CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
     WHERE
         vp.vessel_name IN ({vessel_names_list_str})
@@ -193,8 +192,24 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         else:
             df_final['Hull Condition'] = "N/A" # Default if column is missing
 
-        # Reorder columns for final display: S. No., Vessel Name, Hull Condition, Hull Roughness, ME SFOC
-        final_columns = ['S. No.', 'Vessel Name', 'Hull Condition', 'Hull Roughness Power Loss %', 'ME SFOC']
+        # Add ME Efficiency column
+        def get_me_efficiency(value):
+            if pd.isna(value):
+                return "N/A"
+            if value < 180:
+                return "Good"
+            elif 180 <= value <= 190:
+                return "Average"
+            else: # value > 190
+                return "Poor"
+        
+        if 'ME SFOC' in df_final.columns:
+            df_final['ME Efficiency'] = df_final['ME SFOC'].apply(get_me_efficiency)
+        else:
+            df_final['ME Efficiency'] = "N/A"
+
+        # Reorder columns for final display: S. No., Vessel Name, Hull Condition, Hull Roughness, ME Efficiency, ME SFOC
+        final_columns = ['S. No.', 'Vessel Name', 'Hull Condition', 'Hull Roughness Power Loss %', 'ME Efficiency', 'ME SFOC']
         # Filter to only include columns that actually exist in df_final
         df_final = df_final[[col for col in final_columns if col in df_final.columns]]
 
@@ -205,14 +220,30 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     return pd.DataFrame()
 
 # --- Styling for Streamlit DataFrame ---
-def style_hull_condition(val):
-    if val == "Good":
-        return 'background-color: #d4edda; color: black;' # Light green
-    elif val == "Average":
-        return 'background-color: #fff3cd; color: black;' # Light orange
-    elif val == "Poor":
-        return 'background-color: #f8d7da; color: black;' # Light red
-    return ''
+def style_condition_columns(row):
+    styles = [''] * len(row)
+    
+    # Hull Condition styling
+    if 'Hull Condition' in row.index:
+        hull_val = row['Hull Condition']
+        if hull_val == "Good":
+            styles[row.index.get_loc('Hull Condition')] = 'background-color: #d4edda; color: black;' # Light green
+        elif hull_val == "Average":
+            styles[row.index.get_loc('Hull Condition')] = 'background-color: #fff3cd; color: black;' # Light orange
+        elif hull_val == "Poor":
+            styles[row.index.get_loc('Hull Condition')] = 'background-color: #f8d7da; color: black;' # Light red
+    
+    # ME Efficiency styling
+    if 'ME Efficiency' in row.index:
+        me_val = row['ME Efficiency']
+        if me_val == "Good":
+            styles[row.index.get_loc('ME Efficiency')] = 'background-color: #d4edda; color: black;' # Light green
+        elif me_val == "Average":
+            styles[row.index.get_loc('ME Efficiency')] = 'background-color: #fff3cd; color: black;' # Light orange
+        elif me_val == "Poor":
+            styles[row.index.get_loc('ME Efficiency')] = 'background-color: #f8d7da; color: black;' # Light red
+            
+    return styles
 
 # --- Excel Export Function ---
 def create_excel_download_with_styling(df, filename):
@@ -231,8 +262,8 @@ def create_excel_download_with_styling(df, filename):
         for col_idx, (col_name, cell_value) in enumerate(row_data.items(), 1):
             cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value) # +2 because headers are row 1, data starts row 2 (0-indexed df, 1-indexed excel)
             
-            # Apply styling for 'Hull Condition' column
-            if col_name == 'Hull Condition':
+            # Apply styling for 'Hull Condition' and 'ME Efficiency' columns
+            if col_name in ['Hull Condition', 'ME Efficiency']:
                 if cell_value == "Good":
                     cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid") # Light green
                 elif cell_value == "Average":
@@ -339,8 +370,8 @@ if st.session_state.report_data is not None and not st.session_state.report_data
     st.header("3. Report Results")
     
     # Apply styling for Streamlit dataframe
-    styled_df = st.session_state.report_data.style.applymap(
-        style_hull_condition, subset=['Hull Condition']
+    styled_df = st.session_state.report_data.style.apply(
+        style_condition_columns, axis=1
     )
     st.dataframe(styled_df, use_container_width=True)
 
