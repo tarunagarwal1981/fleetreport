@@ -21,14 +21,24 @@ if 'selected_vessels' not in st.session_state:
 def fetch_vessels(api_url, query):
     """Fetch vessel list from Lambda API using a POST request with a SQL query."""
     try:
-        headers = {'Content-Type': 'application/json'}
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
         payload = {"sql_query": query}
         
         # Debug: Show what we're sending
         st.write("**Debug - Payload being sent:**")
         st.json(payload)
         
-        response = requests.post(api_url, data=json.dumps(payload), headers=headers)
+        # Use json parameter instead of data + json.dumps
+        response = requests.post(
+            api_url, 
+            json=payload,  # This automatically sets Content-Type and serializes
+            headers={'Accept': 'application/json'},  # Simplified headers
+            timeout=30
+        )
         
         # Debug: Show response details
         st.write(f"**Debug - Response Status Code:** {response.status_code}")
@@ -46,14 +56,24 @@ def fetch_vessels(api_url, query):
 def query_vessel_data(api_url, sql_query_string):
     """Send SQL query to Lambda API and get results"""
     try:
-        headers = {'Content-Type': 'application/json'}
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
         payload = {"sql_query": sql_query_string}
         
         # Debug: Show what we're sending
         st.write("**Debug - Export Payload being sent:**")
         st.json(payload)
         
-        response = requests.post(api_url, data=json.dumps(payload), headers=headers)
+        # Use json parameter instead of data + json.dumps
+        response = requests.post(
+            api_url, 
+            json=payload,  # This automatically sets Content-Type and serializes
+            headers={'Accept': 'application/json'},  # Simplified headers
+            timeout=30
+        )
         
         # Debug: Show response details
         st.write(f"**Debug - Export Response Status Code:** {response.status_code}")
