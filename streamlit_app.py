@@ -4,6 +4,11 @@ import pandas as pd
 import json
 import io
 from datetime import datetime
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.formatting.rule import ColorScaleRule, CellIsRule
+from openpyxl.styles.colors import Color
 
 # Page configuration
 st.set_page_config(
@@ -80,12 +85,12 @@ def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session
     return []
 
 def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetch hull roughness power loss for selected vessels."""
+    """Fetch hull roughness power loss for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
-    vessel_names_list_str = ", ".join([f"'{name}'" for name in vessel_names])
-    sql_query_string = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+    # Ensure the column name matches your database exactly
+    sql_query_string = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({', '.join([f\"'{name}'\" for name in vessel_names])});"
     
     st.info(f"Generating report for {len(vessel_names)} vessels...")
     st.code(sql_query_string, language="sql") # Show the query being sent
@@ -95,12 +100,36 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     if result:
         try:
             df = pd.DataFrame(result)
-            # Rename columns for display
-            df = df.rename(columns={
-                'vessel_name': 'Vessel Name',
-                'hull_roughness_power_loss': 'Excess Power'
-            })
-            st.success("Report data retrieved successfully!")
+            
+            # Ensure the column exists before renaming
+            if 'hull_rough_power_loss_pct_ed' in df.columns:
+                df = df.rename(columns={'hull_rough_power_loss_pct_ed': 'Hull Roughness Power Loss %'})
+            else:
+                st.warning("Column 'hull_rough_power_loss_pct_ed' not found in Lambda response. Please check your query or Lambda output.")
+                # If the column is missing, create it with NaNs to avoid errors
+                df['Hull Roughness Power Loss %'] = pd.NA
+
+            # Add S. No. column
+            df.insert(0, 'S. No.', range(1, 1 + len(df)))
+            
+            # Add Hull Condition column
+            def get_hull_condition(value):
+                if pd.isna(value):
+                    return "N/A"
+                if value < 15:
+                    return "Good"
+                elif 15 <= value <= 25:
+                    return "Average"
+                else: # value > 25
+                    return "Poor"
+            
+            df['Hull Condition'] = df['Hull Roughness Power Loss %'].apply(get_hull_condition)
+
+            # Reorder columns for final display
+            df = df[['S. No.', 'vessel_name', 'Hull Condition', 'Hull Roughness Power Loss %']]
+            df = df.rename(columns={'vessel_name': 'Vessel Name'}) # Rename vessel_name after reordering
+
+            st.success("Report data retrieved and processed successfully!")
             return df
         except Exception as e:
             st.error(f"Error processing report data: {str(e)}")
@@ -109,16 +138,58 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     st.error("Failed to retrieve report data.")
     return pd.DataFrame()
 
-def create_excel_download(data, filename):
-    """Convert DataFrame to Excel format for download"""
-    try:
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            data.to_excel(writer, sheet_name='Vessel Data', index=False)
-        return buffer.getvalue()
-    except Exception as e:
-        st.error(f"Error creating Excel file: {str(e)}")
-        return None
+# --- Styling for Streamlit DataFrame ---
+def style_hull_condition(val):
+    if val == "Good":
+        return 'background-color: #d4edda; color: black;' # Light green
+    elif val == "Average":
+        return 'background-color: #fff3cd; color: black;' # Light orange
+    elif val == "Poor":
+        return 'background-color: #f8d7da; color: black;' # Light red
+    return ''
+
+# --- Excel Export Function ---
+def create_excel_download_with_styling(df, filename):
+    """Convert DataFrame to Excel format with styling and auto-width using openpyxl."""
+    output = io.BytesIO()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Vessel Report"
+
+    # Write headers
+    for col_idx, col_name in enumerate(df.columns, 1):
+        ws.cell(row=1, column=col_idx, value=col_name).font = Font(bold=True)
+
+    # Write data and apply cell styling
+    for row_idx, row_data in df.iterrows():
+        for col_idx, (col_name, cell_value) in enumerate(row_data.items(), 1):
+            cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value) # +2 because headers are row 1, data starts row 2 (0-indexed df, 1-indexed excel)
+            
+            # Apply styling for 'Hull Condition' column
+            if col_name == 'Hull Condition':
+                if cell_value == "Good":
+                    cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid") # Light green
+                elif cell_value == "Average":
+                    cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid") # Light orange
+                elif cell_value == "Poor":
+                    cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid") # Light red
+                cell.font = Font(color="000000") # Black font color
+
+    # Set column widths
+    for col_idx, column in enumerate(df.columns, 1):
+        max_length = 0
+        column_letter = get_column_letter(col_idx)
+        for cell in ws[column_letter]:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            except:
+                pass
+        adjusted_width = (max_length + 2) * 1.2 # Add a little padding
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    wb.save(output)
+    return output.getvalue()
 
 # --- Main App Layout ---
 st.title("🚢 Vessel Performance Report Tool")
@@ -200,12 +271,17 @@ else:
 # --- Display Report ---
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
     st.header("3. Report Results")
-    st.dataframe(st.session_state.report_data, use_container_width=True)
+    
+    # Apply styling for Streamlit dataframe
+    styled_df = st.session_state.report_data.style.applymap(
+        style_hull_condition, subset=['Hull Condition']
+    )
+    st.dataframe(styled_df, use_container_width=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"excess_power_report_{timestamp}.xlsx"
 
-    excel_data = create_excel_download(st.session_state.report_data, filename)
+    excel_data = create_excel_download_with_styling(st.session_state.report_data, filename)
 
     if excel_data:
         st.download_button(
