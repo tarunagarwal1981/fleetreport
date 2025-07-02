@@ -85,7 +85,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
     vessel_names_list_str = ", ".join([f"'{name}'" for name in vessel_names])
-    sql_query_string = f"SELECT vessel_name, hull_roughness_power_loss FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+    sql_query_string = f"SELECT vessel_name, hull_roughness_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
     
     st.info(f"Generating report for {len(vessel_names)} vessels...")
     st.code(sql_query_string, language="sql") # Show the query being sent
