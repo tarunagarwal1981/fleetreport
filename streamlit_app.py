@@ -19,8 +19,17 @@ st.set_page_config(
 # Initialize session state
 if 'vessels' not in st.session_state:
     st.session_state.vessels = []
-if 'selected_vessels' not in st.session_state:
-    st.session_state.selected_vessels = set() # Use a set for faster add/remove and uniqueness
+
+# --- FIX START ---
+# Ensure selected_vessels is always a set
+if 'selected_vessels' not in st.session_state or not isinstance(st.session_state.selected_vessels, set):
+    # If it's not in session state, or if it's not a set (e.g., it's a list from a previous run),
+    # re-initialize it as an empty set.
+    # If it was a list with values, you might want to convert them: set(st.session_state.selected_vessels)
+    # But for robustness and to clear potential bad state, an empty set is safer.
+    st.session_state.selected_vessels = set()
+# --- FIX END ---
+
 if 'report_data' not in st.session_state:
     st.session_state.report_data = None
 if 'search_query' not in st.session_state:
