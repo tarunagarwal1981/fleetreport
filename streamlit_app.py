@@ -203,15 +203,28 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
             else: # value > 190
                 return "Poor"
         
+        # Ensure 'ME SFOC' exists before attempting to create 'ME Efficiency'
         if 'ME SFOC' in df_final.columns:
             df_final['ME Efficiency'] = df_final['ME SFOC'].apply(get_me_efficiency)
         else:
-            df_final['ME Efficiency'] = "N/A"
+            df_final['ME Efficiency'] = "N/A" # Default if ME SFOC is missing
 
-        # Reorder columns for final display: S. No., Vessel Name, Hull Condition, Hull Roughness, ME Efficiency, ME SFOC
-        final_columns = ['S. No.', 'Vessel Name', 'Hull Condition', 'Hull Roughness Power Loss %', 'ME Efficiency', 'ME SFOC']
-        # Filter to only include columns that actually exist in df_final
-        df_final = df_final[[col for col in final_columns if col in df_final.columns]]
+        # Define the desired order of columns
+        desired_columns_order = [
+            'S. No.', 
+            'Vessel Name', 
+            'Hull Condition', 
+            'Hull Roughness Power Loss %', 
+            'ME Efficiency', 
+            'ME SFOC'
+        ]
+        
+        # Filter df_final to only include columns that exist and are in the desired order
+        # This ensures that if a column (like 'ME SFOC' or 'Hull Roughness Power Loss %')
+        # was not retrieved, it won't cause an error, and the 'Condition' columns
+        # will still be created if their source data exists.
+        existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
+        df_final = df_final[existing_and_ordered_columns]
 
         st.success("Report data retrieved and processed successfully!")
         return df_final
