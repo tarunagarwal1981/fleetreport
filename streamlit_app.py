@@ -18,16 +18,20 @@ if 'vessels' not in st.session_state:
 if 'selected_vessels' not in st.session_state:
     st.session_state.selected_vessels = []
 
-def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, region='ap-south-1'):
+def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token=None, region='ap-south-1'):
     """Invoke Lambda function directly using AWS SDK"""
     try:
         # Create Lambda client
-        lambda_client = boto3.client(
-            'lambda',
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            region_name=region
-        )
+        # Pass session_token if provided
+        client_config = {
+            'aws_access_key_id': aws_access_key,
+            'aws_secret_access_key': aws_secret_key,
+            'region_name': region
+        }
+        if aws_session_token:
+            client_config['aws_session_token'] = aws_session_token
+
+        lambda_client = boto3.client('lambda', **client_config)
         
         # Invoke the function
         response = lambda_client.invoke(
@@ -40,35 +44,40 @@ def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_ke
         response_payload = json.loads(response['Payload'].read())
         
         if response.get('StatusCode') == 200:
-            # Check if the Lambda returned an error
+            # Check if the Lambda returned an error (e.g., from its own error handling)
             if 'statusCode' in response_payload and response_payload['statusCode'] != 200:
-                st.error(f"Lambda error: {response_payload.get('body', 'Unknown error')}")
+                st.error(f"Lambda returned an error: {response_payload.get('body', 'Unknown error')}")
                 return None
             
-            # If body is a string, parse it
+            # If body is a string, parse it (common for Lambda Function URLs or API Gateway)
             if 'body' in response_payload:
                 if isinstance(response_payload['body'], str):
-                    return json.loads(response_payload['body'])
+                    try:
+                        return json.loads(response_payload['body'])
+                    except json.JSONDecodeError:
+                        # If it's a string but not JSON, return as is
+                        return response_payload['body']
                 else:
                     return response_payload['body']
             else:
+                # If no 'body' key, return the whole payload
                 return response_payload
         else:
-            st.error(f"AWS invoke error: {response_payload}")
+            st.error(f"AWS invoke error (Status Code: {response.get('StatusCode')}): {response_payload}")
             return None
             
     except Exception as e:
         st.error(f"Error invoking Lambda: {str(e)}")
         return None
 
-def fetch_vessels(function_name, query, aws_access_key, aws_secret_key):
+def fetch_vessels(function_name, query, aws_access_key, aws_secret_key, aws_session_token):
     """Fetch vessel list from Lambda function using direct invoke"""
     payload = {"sql_query": query}
     
     st.write("**Debug - Payload being sent:**")
     st.json(payload)
     
-    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key)
+    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
     
     if result:
         st.write("**Debug - Response received:**")
@@ -77,14 +86,14 @@ def fetch_vessels(function_name, query, aws_access_key, aws_secret_key):
     
     return []
 
-def query_vessel_data(function_name, sql_query_string, aws_access_key, aws_secret_key):
+def query_vessel_data(function_name, sql_query_string, aws_access_key, aws_secret_key, aws_session_token):
     """Send SQL query to Lambda function and get results"""
     payload = {"sql_query": sql_query_string}
     
     st.write("**Debug - Export Payload being sent:**")
     st.json(payload)
     
-    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key)
+    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
     
     if result:
         st.write("**Debug - Export Response received:**")
@@ -138,6 +147,12 @@ with st.sidebar:
         help="Your AWS Secret Access Key"
     )
     
+    aws_session_token = st.text_input(
+        "AWS Session Token (Optional)",
+        type="password",
+        help="Required if using temporary credentials (e.g., from STS AssumeRole)"
+    )
+    
     # Lambda function name (extract from URL)
     function_name = st.text_input(
         "Lambda Function Name",
@@ -170,7 +185,7 @@ if st.button("Test Direct Lambda Invoke"):
         st.error("Please provide AWS credentials and function name")
     else:
         with st.spinner("Testing direct Lambda invoke..."):
-            test_result = fetch_vessels(function_name, test_query, aws_access_key, aws_secret_key)
+            test_result = fetch_vessels(function_name, test_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
             if test_result:
                 st.success("✅ Direct invoke worked!")
                 st.json(test_result)
@@ -187,7 +202,7 @@ with col1:
 
     if st.button("Fetch Vessels", disabled=not all([aws_access_key, aws_secret_key, function_name])):
         with st.spinner("Loading vessels..."):
-            vessels_data = fetch_vessels(function_name, vessel_name_query, aws_access_key, aws_secret_key)
+            vessels_data = fetch_vessels(function_name, vessel_name_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
 
             if vessels_data:
                 extracted_vessel_names = []
@@ -250,7 +265,7 @@ if st.session_state.selected_vessels and base_query and all([aws_access_key, aws
 
     if export_button:
         with st.spinner("Querying data..."):
-            result_data = query_vessel_data(function_name, preview_query, aws_access_key, aws_secret_key)
+            result_data = query_vessel_data(function_name, preview_query, aws_access_key, aws_secret_key, aws_session_token if aws_session_token else None)
 
             if result_data:
                 st.success("✅ Data retrieved successfully!")
@@ -322,7 +337,7 @@ with st.expander("📖 How to Use"):
     3. **Set SQL Query**: Configure your base SQL query using `{vessel_names}` placeholder
     4. **Load Vessels**: Click "Fetch Vessels" to get the list
     5. **Select Vessels**: Use checkboxes to select vessels
-    6. **Export**: Click "Export Data" to download Excel file
+    6. **Export**: Click "Export Data" to run the query and download Excel file
     """)
 
 # Footer
