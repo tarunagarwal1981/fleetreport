@@ -20,9 +20,11 @@ st.set_page_config(
 if 'vessels' not in st.session_state:
     st.session_state.vessels = []
 if 'selected_vessels' not in st.session_state:
-    st.session_state.selected_vessels = []
+    st.session_state.selected_vessels = set() # Use a set for faster add/remove and uniqueness
 if 'report_data' not in st.session_state:
     st.session_state.report_data = None
+if 'search_query' not in st.session_state:
+    st.session_state.search_query = ""
 
 # --- Lambda Invocation Helper ---
 def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token=None, region='ap-south-1'):
@@ -78,6 +80,7 @@ def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session
                 extracted_vessel_names.append(item['vessel_name'])
             elif isinstance(item, str): # In case the Lambda returns a list of strings directly
                 extracted_vessel_names.append(item)
+        extracted_vessel_names.sort() # Sort for better display
         st.success(f"Loaded {len(extracted_vessel_names)} vessels.")
         return extracted_vessel_names
     st.error("Failed to load vessel names.")
@@ -171,8 +174,10 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
             df_fuel_saving = pd.DataFrame(fuel_saving_result)
             if 'hull_rough_excess_consumption_mt_ed' in df_fuel_saving.columns:
                 df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving'})
-                # Apply the capping logic: if > 5, set to 4.9
-                df_fuel_saving['Potential Fuel Saving'] = df_fuel_saving['Potential Fuel Saving'].apply(lambda x: 4.9 if pd.notna(x) and x > 5 else x)
+                # Apply the capping logic: if > 5, set to 4.9; if < 0, set to 0
+                df_fuel_saving['Potential Fuel Saving'] = df_fuel_saving['Potential Fuel Saving'].apply(
+                    lambda x: 4.9 if pd.notna(x) and x > 5 else (0 if pd.notna(x) and x < 0 else x)
+                )
             else:
                 st.warning("Column 'hull_rough_excess_consumption_mt_ed' not found in Lambda response for fuel saving data.")
                 df_fuel_saving['Potential Fuel Saving'] = pd.NA
@@ -185,7 +190,6 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         st.error("Failed to retrieve Potential Fuel Saving data.")
 
     # --- Merge DataFrames ---
-    # Start with df_hull, then merge df_me, then merge df_fuel_saving
     df_final = pd.DataFrame()
     if not df_hull.empty:
         df_final = df_hull
@@ -230,7 +234,9 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     def get_me_efficiency(value):
         if pd.isna(value):
             return "N/A"
-        if value < 180:
+        if value < 160: # New logic: Anomalous data
+            return "Anomalous data"
+        elif value < 180:
             return "Good"
         elif 180 <= value <= 190:
             return "Average"
@@ -242,15 +248,19 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     else:
         df_final['ME Efficiency'] = "N/A" # Default if ME SFOC is missing
 
+    # Add empty Comments column
+    df_final['Comments'] = ""
+
     # Define the desired order of columns
     desired_columns_order = [
         'S. No.', 
         'Vessel Name', 
         'Hull Condition', 
-        'Hull Roughness Power Loss %', 
         'ME Efficiency', 
-        'ME SFOC',
-        'Potential Fuel Saving' # New column
+        'Potential Fuel Saving',
+        'Comments', # New empty column
+        'Hull Roughness Power Loss %', # Moved to last
+        'ME SFOC' # Moved to last
     ]
     
     # Filter df_final to only include columns that exist and are in the desired order
@@ -283,6 +293,8 @@ def style_condition_columns(row):
             styles[row.index.get_loc('ME Efficiency')] = 'background-color: #fff3cd; color: black;' # Light orange
         elif me_val == "Poor":
             styles[row.index.get_loc('ME Efficiency')] = 'background-color: #f8d7da; color: black;' # Light red
+        elif me_val == "Anomalous data": # New styling for anomalous data
+            styles[row.index.get_loc('ME Efficiency')] = 'background-color: #e0e0e0; color: black;' # Light grey
             
     return styles
 
@@ -311,6 +323,8 @@ def create_excel_download_with_styling(df, filename):
                     cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid") # Light orange
                 elif cell_value == "Poor":
                     cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid") # Light red
+                elif cell_value == "Anomalous data": # New styling for anomalous data in Excel
+                    cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid") # Light grey
                 cell.font = Font(color="000000") # Black font color
 
     # Set column widths
@@ -373,32 +387,60 @@ if all([aws_access_key, aws_secret_key, function_name]) and not st.session_state
 st.header("1. Select Vessels")
 
 if st.session_state.vessels:
-    # Use st.multiselect for better handling of many options
-    st.session_state.selected_vessels = st.multiselect(
-        "Choose Vessels for Report:",
-        options=st.session_state.vessels,
-        default=st.session_state.selected_vessels, # Keep previously selected
-        placeholder="Search and select vessels..."
+    # New UI/UX for vessel selection
+    st.session_state.search_query = st.text_input(
+        "Search vessels:",
+        value=st.session_state.search_query,
+        placeholder="Type to filter vessel names...",
+        help="Type to filter the list of vessels below."
     )
-    st.info(f"📊 {len(st.session_state.vessels)} vessels available. {len(st.session_state.selected_vessels)} selected.")
+
+    filtered_vessels = [
+        v for v in st.session_state.vessels 
+        if st.session_state.search_query.lower() in v.lower()
+    ]
+
+    st.markdown(f"📊 {len(st.session_state.vessels)} vessels available. {len(st.session_state.selected_vessels)} selected.")
+
+    # Use a container for scrollable list of checkboxes
+    with st.container(height=300, border=True):
+        if filtered_vessels:
+            for vessel in filtered_vessels:
+                # Use a unique key for each checkbox
+                checkbox_state = st.checkbox(
+                    vessel, 
+                    value=(vessel in st.session_state.selected_vessels),
+                    key=f"checkbox_{vessel}"
+                )
+                if checkbox_state:
+                    st.session_state.selected_vessels.add(vessel)
+                else:
+                    if vessel in st.session_state.selected_vessels:
+                        st.session_state.selected_vessels.remove(vessel)
+        else:
+            st.info("No vessels match your search query.")
+    
+    # Convert set back to list for query function
+    selected_vessels_list = list(st.session_state.selected_vessels)
 else:
     st.warning("Please provide AWS credentials and Lambda Function Name in the sidebar to load vessels.")
+    selected_vessels_list = [] # Ensure it's an empty list if no vessels loaded
 
 st.header("2. Generate Report")
 
-if st.session_state.selected_vessels and all([aws_access_key, aws_secret_key, function_name]):
+if selected_vessels_list and all([aws_access_key, aws_secret_key, function_name]):
     if st.button("🚀 Generate Excess Power Report", type="primary"):
         with st.spinner("Generating report..."):
             st.session_state.report_data = query_report_data(
                 function_name, 
-                st.session_state.selected_vessels, 
+                selected_vessels_list, # Pass the list
                 aws_access_key, 
                 aws_secret_key, 
                 aws_session_token
             )
 else:
     missing_items = []
-    if not st.session_state.selected_vessels:
+    if not selected_vessels_list:
         missing_items.append("Select vessels")
     if not all([aws_access_key, aws_secret_key, function_name]):
         missing_items.append("Configure AWS credentials and Lambda Function Name")
@@ -444,7 +486,7 @@ with st.expander("📖 How to Use"):
     ### Step-by-step Guide:
     
     1.  **Configure AWS**: Enter your AWS credentials and Lambda function name in the sidebar. Vessels will attempt to load automatically.
-    2.  **Select Vessels**: Use the multi-select dropdown to choose the vessels you want to include in the report. You can search within the dropdown.
+    2.  **Select Vessels**: Use the search bar to filter vessels, then check the boxes to select them.
     3.  **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
     4.  **Download**: If data is available, a download button will appear to get the report as an Excel file.
     """)
