@@ -176,7 +176,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
                 df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving'})
                 # Apply the capping logic: if > 5, set to 4.9; if < 0, set to 0
                 df_fuel_saving['Potential Fuel Saving'] = df_fuel_saving['Potential Fuel Saving'].apply(
-                    lambda x: 4.9 if pd.notna(x) and x > 5 else (0 if pd.notna(x) and x < 0 else x)
+                    lambda x: 4.9 if pd.notna(x) and x > 5 else (0.0 if pd.notna(x) and x < 0 else x) # Ensure 0.0 for float consistency
                 )
             else:
                 st.warning("Column 'hull_rough_excess_consumption_mt_ed' not found in Lambda response for fuel saving data.")
@@ -191,20 +191,18 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
 
     # --- Merge DataFrames ---
     df_final = pd.DataFrame()
+    # Start with a DataFrame containing all selected vessel names to ensure all are present
+    # even if they have no data for specific metrics.
+    df_final = pd.DataFrame({'Vessel Name': list(vessel_names)}) 
+
     if not df_hull.empty:
-        df_final = df_hull
+        df_final = pd.merge(df_final, df_hull, on='Vessel Name', how='left')
     
     if not df_me.empty:
-        if df_final.empty:
-            df_final = df_me
-        else:
-            df_final = pd.merge(df_final, df_me, on='Vessel Name', how='outer')
+        df_final = pd.merge(df_final, df_me, on='Vessel Name', how='left')
             
     if not df_fuel_saving.empty:
-        if df_final.empty:
-            df_final = df_fuel_saving
-        else:
-            df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='outer')
+        df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='left')
 
     if df_final.empty:
         st.warning("No data retrieved for any of the requested metrics.")
@@ -264,6 +262,9 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     ]
     
     # Filter df_final to only include columns that exist and are in the desired order
+    # This ensures that if a column (like 'ME SFOC' or 'Hull Roughness Power Loss %')
+    # was not retrieved, it won't cause an error, and the 'Condition' columns
+    # will still be created if their source data exists.
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
     df_final = df_final[existing_and_ordered_columns]
 
@@ -407,6 +408,7 @@ if st.session_state.vessels:
         if filtered_vessels:
             for vessel in filtered_vessels:
                 # Use a unique key for each checkbox
+                # Ensure the key is unique across all runs, f-string with vessel name is good.
                 checkbox_state = st.checkbox(
                     vessel, 
                     value=(vessel in st.session_state.selected_vessels),
