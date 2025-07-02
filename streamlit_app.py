@@ -89,8 +89,12 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
+    # Corrected way to format vessel names for SQL IN clause
+    quoted_vessel_names = [f"'{name}'" for name in vessel_names]
+    vessel_names_list_str = ", ".join(quoted_vessel_names)
+
     # Ensure the column name matches your database exactly
-    sql_query_string = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({', '.join([f\"'{name}'\" for name in vessel_names])});"
+    sql_query_string = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
     
     st.info(f"Generating report for {len(vessel_names)} vessels...")
     st.code(sql_query_string, language="sql") # Show the query being sent
@@ -181,7 +185,7 @@ def create_excel_download_with_styling(df, filename):
         column_letter = get_column_letter(col_idx)
         for cell in ws[column_letter]:
             try:
-                if len(str(cell.value)) > max_length:
+                if cell.value is not None and len(str(cell.value)) > max_length:
                     max_length = len(str(cell.value))
             except:
                 pass
