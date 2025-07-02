@@ -133,9 +133,9 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         vp.vessel_name,
         AVG(vps.me_sfoc) AS avg_me_sfoc
     FROM
-        reporting_layer.digital_desk.vessel_performance_summary vps
+        vessel_performance_summary vps
     JOIN
-        reporting_layer.vessel_datahub.vessel_particulars vp
+        vessel_particulars vp
     ON
         vps.vessel_imo = vp.vessel_imo
     WHERE
