@@ -84,7 +84,7 @@ def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session
     return []
 
 def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetch hull roughness power loss and ME SFOC for selected vessels and process for report."""
+    """Fetch hull roughness power loss, ME SFOC, and Potential Fuel Saving for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
@@ -117,7 +117,6 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
         st.error("Failed to retrieve hull roughness data.")
 
     # --- Query 2: ME SFOC ---
-    # Applying CAST to vessel_imo in the JOIN condition to resolve bigint = text error
     sql_query_me = f"""
     SELECT
         vp.vessel_name,
@@ -158,79 +157,108 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     else:
         st.error("Failed to retrieve ME SFOC data.")
 
-    # --- Merge DataFrames ---
-    if not df_hull.empty and not df_me.empty:
-        # Merge on 'Vessel Name'
-        df_final = pd.merge(df_hull, df_me, on='Vessel Name', how='outer')
-    elif not df_hull.empty:
-        df_final = df_hull
-    elif not df_me.empty:
-        df_final = df_me
+    # --- Query 3: Potential Fuel Saving ---
+    sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+    
+    st.info(f"Fetching Potential Fuel Saving data for {len(vessel_names)} vessels...")
+    st.code(sql_query_fuel_saving, language="sql")
+
+    fuel_saving_result = invoke_lambda_function(function_name, {"sql_query": sql_query_fuel_saving}, aws_access_key, aws_secret_key, aws_session_token)
+
+    df_fuel_saving = pd.DataFrame()
+    if fuel_saving_result:
+        try:
+            df_fuel_saving = pd.DataFrame(fuel_saving_result)
+            if 'hull_rough_excess_consumption_mt_ed' in df_fuel_saving.columns:
+                df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving'})
+                # Apply the capping logic: if > 5, set to 4.9
+                df_fuel_saving['Potential Fuel Saving'] = df_fuel_saving['Potential Fuel Saving'].apply(lambda x: 4.9 if pd.notna(x) and x > 5 else x)
+            else:
+                st.warning("Column 'hull_rough_excess_consumption_mt_ed' not found in Lambda response for fuel saving data.")
+                df_fuel_saving['Potential Fuel Saving'] = pd.NA
+            df_fuel_saving = df_fuel_saving.rename(columns={'vessel_name': 'Vessel Name'})
+        except Exception as e:
+            st.error(f"Error processing fuel saving data: {str(e)}")
+            st.json(fuel_saving_result)
+            df_fuel_saving = pd.DataFrame()
     else:
-        st.warning("No data retrieved for either Hull Roughness or ME SFOC.")
+        st.error("Failed to retrieve Potential Fuel Saving data.")
+
+    # --- Merge DataFrames ---
+    # Start with df_hull, then merge df_me, then merge df_fuel_saving
+    df_final = pd.DataFrame()
+    if not df_hull.empty:
+        df_final = df_hull
+    
+    if not df_me.empty:
+        if df_final.empty:
+            df_final = df_me
+        else:
+            df_final = pd.merge(df_final, df_me, on='Vessel Name', how='outer')
+            
+    if not df_fuel_saving.empty:
+        if df_final.empty:
+            df_final = df_fuel_saving
+        else:
+            df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='outer')
+
+    if df_final.empty:
+        st.warning("No data retrieved for any of the requested metrics.")
         return pd.DataFrame()
 
     # --- Post-merge processing for final report ---
-    if not df_final.empty:
-        # Add S. No. column (after merge to ensure correct numbering)
-        df_final.insert(0, 'S. No.', range(1, 1 + len(df_final)))
-        
-        # Add Hull Condition column (re-apply in case of merge issues or missing data)
-        def get_hull_condition(value):
-            if pd.isna(value):
-                return "N/A"
-            if value < 15:
-                return "Good"
-            elif 15 <= value <= 25:
-                return "Average"
-            else: # value > 25
-                return "Poor"
-        
-        # Ensure 'Hull Roughness Power Loss %' exists before applying
-        if 'Hull Roughness Power Loss %' in df_final.columns:
-            df_final['Hull Condition'] = df_final['Hull Roughness Power Loss %'].apply(get_hull_condition)
-        else:
-            df_final['Hull Condition'] = "N/A" # Default if column is missing
-
-        # Add ME Efficiency column
-        def get_me_efficiency(value):
-            if pd.isna(value):
-                return "N/A"
-            if value < 180:
-                return "Good"
-            elif 180 <= value <= 190:
-                return "Average"
-            else: # value > 190
-                return "Poor"
-        
-        # Ensure 'ME SFOC' exists before attempting to create 'ME Efficiency'
-        if 'ME SFOC' in df_final.columns:
-            df_final['ME Efficiency'] = df_final['ME SFOC'].apply(get_me_efficiency)
-        else:
-            df_final['ME Efficiency'] = "N/A" # Default if ME SFOC is missing
-
-        # Define the desired order of columns
-        desired_columns_order = [
-            'S. No.', 
-            'Vessel Name', 
-            'Hull Condition', 
-            'Hull Roughness Power Loss %', 
-            'ME Efficiency', 
-            'ME SFOC'
-        ]
-        
-        # Filter df_final to only include columns that exist and are in the desired order
-        # This ensures that if a column (like 'ME SFOC' or 'Hull Roughness Power Loss %')
-        # was not retrieved, it won't cause an error, and the 'Condition' columns
-        # will still be created if their source data exists.
-        existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
-        df_final = df_final[existing_and_ordered_columns]
-
-        st.success("Report data retrieved and processed successfully!")
-        return df_final
+    # Add S. No. column (after merge to ensure correct numbering)
+    df_final.insert(0, 'S. No.', range(1, 1 + len(df_final)))
     
-    st.error("Failed to retrieve or process report data.")
-    return pd.DataFrame()
+    # Add Hull Condition column
+    def get_hull_condition(value):
+        if pd.isna(value):
+            return "N/A"
+        if value < 15:
+            return "Good"
+        elif 15 <= value <= 25:
+            return "Average"
+        else: # value > 25
+            return "Poor"
+    
+    if 'Hull Roughness Power Loss %' in df_final.columns:
+        df_final['Hull Condition'] = df_final['Hull Roughness Power Loss %'].apply(get_hull_condition)
+    else:
+        df_final['Hull Condition'] = "N/A" # Default if column is missing
+
+    # Add ME Efficiency column
+    def get_me_efficiency(value):
+        if pd.isna(value):
+            return "N/A"
+        if value < 180:
+            return "Good"
+        elif 180 <= value <= 190:
+            return "Average"
+        else: # value > 190
+            return "Poor"
+    
+    if 'ME SFOC' in df_final.columns:
+        df_final['ME Efficiency'] = df_final['ME SFOC'].apply(get_me_efficiency)
+    else:
+        df_final['ME Efficiency'] = "N/A" # Default if ME SFOC is missing
+
+    # Define the desired order of columns
+    desired_columns_order = [
+        'S. No.', 
+        'Vessel Name', 
+        'Hull Condition', 
+        'Hull Roughness Power Loss %', 
+        'ME Efficiency', 
+        'ME SFOC',
+        'Potential Fuel Saving' # New column
+    ]
+    
+    # Filter df_final to only include columns that exist and are in the desired order
+    existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
+    df_final = df_final[existing_and_ordered_columns]
+
+    st.success("Report data retrieved and processed successfully!")
+    return df_final
 
 # --- Styling for Streamlit DataFrame ---
 def style_condition_columns(row):
