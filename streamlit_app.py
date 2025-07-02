@@ -127,7 +127,8 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     JOIN
         vessel_particulars vp
     ON
-        vps.vessel_imo = CAST(vp.vessel_imo AS BIGINT) -- <--- Changed this line
+
+        CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
     WHERE
         vp.vessel_name IN ({vessel_names_list_str})
         AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
