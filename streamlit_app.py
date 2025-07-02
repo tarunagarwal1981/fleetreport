@@ -7,7 +7,7 @@ from datetime import datetime
 
 # Page configuration
 st.set_page_config(
-    page_title="Vessel Data Export & Report",
+    page_title="Vessel Data & Report Tool",
     page_icon="🚢",
     layout="wide"
 )
@@ -20,7 +20,7 @@ if 'selected_vessels' not in st.session_state:
 if 'report_data' not in st.session_state:
     st.session_state.report_data = None
 
-# --- AWS Lambda Invocation Functions ---
+# --- Lambda Invocation Helper ---
 def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token=None, region='ap-south-1'):
     """Invoke Lambda function directly using AWS SDK"""
     try:
@@ -59,48 +59,62 @@ def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_ke
         st.error(f"Error invoking Lambda: {str(e)}")
         return None
 
-def fetch_vessel_names_from_lambda(function_name, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetches vessel names using a specific SQL query."""
+# --- Data Fetching Functions ---
+@st.cache_data(ttl=3600) # Cache results for 1 hour to avoid re-fetching on every rerun
+def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session_token):
+    """Fetch all vessel names from Lambda function."""
     query = "select vessel_name from vessel_particulars"
-    payload = {"sql_query": query}
-    
-    result = invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
+    st.info("Loading all vessel names...")
+    result = invoke_lambda_function(function_name, {"sql_query": query}, aws_access_key, aws_secret_key, aws_session_token)
     
     if result:
-        extracted_names = []
+        extracted_vessel_names = []
         for item in result:
             if isinstance(item, dict) and 'vessel_name' in item:
-                extracted_names.append(item['vessel_name'])
-            elif isinstance(item, str):
-                extracted_names.append(item)
-        return extracted_names
+                extracted_vessel_names.append(item['vessel_name'])
+            elif isinstance(item, str): # In case the Lambda returns a list of strings directly
+                extracted_vessel_names.append(item)
+        st.success(f"Loaded {len(extracted_vessel_names)} vessels.")
+        return extracted_vessel_names
+    st.error("Failed to load vessel names.")
     return []
 
-def query_vessel_data_from_lambda(function_name, sql_query_string, aws_access_key, aws_secret_key, aws_session_token):
-    """Sends a SQL query to Lambda and gets results."""
-    payload = {"sql_query": sql_query_string}
-    return invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token)
+def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_key, aws_session_token):
+    """Fetch hull roughness power loss for selected vessels."""
+    if not vessel_names:
+        return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
-# --- Excel Download Function ---
+    vessel_names_list_str = ", ".join([f"'{name}'" for name in vessel_names])
+    sql_query_string = f"SELECT vessel_name, hull_roughness_power_loss FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+    
+    st.info(f"Generating report for {len(vessel_names)} vessels...")
+    st.code(sql_query_string, language="sql") # Show the query being sent
+
+    result = invoke_lambda_function(function_name, {"sql_query": sql_query_string}, aws_access_key, aws_secret_key, aws_session_token)
+    
+    if result:
+        try:
+            df = pd.DataFrame(result)
+            # Rename columns for display
+            df = df.rename(columns={
+                'vessel_name': 'Vessel Name',
+                'hull_roughness_power_loss': 'Excess Power'
+            })
+            st.success("Report data retrieved successfully!")
+            return df
+        except Exception as e:
+            st.error(f"Error processing report data: {str(e)}")
+            st.json(result) # Show raw result for debugging
+            return pd.DataFrame()
+    st.error("Failed to retrieve report data.")
+    return pd.DataFrame()
+
 def create_excel_download(data, filename):
-    """Convert data to Excel format for download"""
+    """Convert DataFrame to Excel format for download"""
     try:
-        if isinstance(data, list):
-            df = pd.DataFrame(data)
-        elif isinstance(data, dict):
-            if 'data' in data:
-                df = pd.DataFrame(data['data'])
-            elif 'results' in data:
-                df = pd.DataFrame(data['results'])
-            else:
-                df = pd.DataFrame([data])
-        else:
-            df = pd.DataFrame(data)
-
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Vessel Data', index=False)
-
+            data.to_excel(writer, sheet_name='Vessel Data', index=False)
         return buffer.getvalue()
     except Exception as e:
         st.error(f"Error creating Excel file: {str(e)}")
@@ -108,7 +122,7 @@ def create_excel_download(data, filename):
 
 # --- Main App Layout ---
 st.title("🚢 Vessel Performance Report Tool")
-st.markdown("Select vessels and generate a report on their hull performance.")
+st.markdown("Select vessels and generate a report on their excess power.")
 
 # Sidebar for AWS Configuration
 with st.sidebar:
@@ -132,7 +146,7 @@ with st.sidebar:
         help="Required if using temporary credentials (e.g., from STS AssumeRole)"
     )
     
-    lambda_function_name = st.text_input(
+    function_name = st.text_input(
         "Lambda Function Name",
         value="",
         help="The name of your Lambda function (e.g., 'my-vessel-query-function')"
@@ -141,94 +155,67 @@ with st.sidebar:
     st.info("💡 **Function Name**: Find this in your AWS Lambda console. It's the name, not the full ARN or URL.")
     st.warning("⚠️ **Permissions**: Ensure the provided AWS credentials have `lambda:InvokeFunction` permission on your Lambda.")
 
-# --- Auto-fetch vessels on page load ---
-if lambda_function_name and aws_access_key and aws_secret_key and not st.session_state.vessels:
-    with st.spinner("Fetching vessel list..."):
-        fetched_vessels = fetch_vessel_names_from_lambda(
-            lambda_function_name, aws_access_key, aws_secret_key, aws_session_token
-        )
-        if fetched_vessels:
-            st.session_state.vessels = sorted(list(set(fetched_vessels))) # Ensure unique and sorted
-            st.success(f"Loaded {len(st.session_state.vessels)} vessels.")
-        else:
-            st.error("Failed to load vessels. Please check AWS configuration and Lambda logs.")
+# --- Automatic Vessel Loading ---
+# Only attempt to fetch if credentials and function name are provided
+if all([aws_access_key, aws_secret_key, function_name]) and not st.session_state.vessels:
+    st.session_state.vessels = fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session_token)
 
 # --- Main Content Area ---
 st.header("1. Select Vessels")
 
 if st.session_state.vessels:
-    # Multiselect for vessel selection
+    # Use st.multiselect for better handling of many options
     st.session_state.selected_vessels = st.multiselect(
         "Choose Vessels for Report:",
         options=st.session_state.vessels,
-        default=st.session_state.selected_vessels, # Maintain selection across reruns
-        placeholder="Select one or more vessels...",
-        help="Type to search or select from the list."
+        default=st.session_state.selected_vessels, # Keep previously selected
+        placeholder="Search and select vessels..."
     )
-    
-    if st.session_state.selected_vessels:
-        st.success(f"✅ {len(st.session_state.selected_vessels)} vessels selected.")
-    else:
-        st.info("No vessels selected yet.")
+    st.info(f"📊 {len(st.session_state.vessels)} vessels available. {len(st.session_state.selected_vessels)} selected.")
 else:
-    st.warning("Please configure AWS credentials and Lambda Function Name in the sidebar to load vessels.")
+    st.warning("Please provide AWS credentials and Lambda Function Name in the sidebar to load vessels.")
 
 st.header("2. Generate Report")
 
-if st.button("📊 Generate Performance Report", type="primary", 
-             disabled=not (st.session_state.selected_vessels and lambda_function_name and aws_access_key and aws_secret_key)):
-    
+if st.session_state.selected_vessels and all([aws_access_key, aws_secret_key, function_name]):
+    if st.button("🚀 Generate Excess Power Report", type="primary"):
+        with st.spinner("Generating report..."):
+            st.session_state.report_data = query_report_data(
+                function_name, 
+                st.session_state.selected_vessels, 
+                aws_access_key, 
+                aws_secret_key, 
+                aws_session_token
+            )
+else:
+    missing_items = []
     if not st.session_state.selected_vessels:
-        st.warning("Please select at least one vessel to generate a report.")
-    else:
-        report_results = []
-        with st.spinner("Fetching performance data... This may take a moment for many vessels."):
-            for vessel_name in st.session_state.selected_vessels:
-                # Construct the specific query for hull_roughness_power_loss
-                report_query = f"select hull_roughness_power_loss from sdb_reporting_layer.digital_desk.hull_performance_six_months where vessel_name = '{vessel_name}';"
-                
-                data = query_vessel_data_from_lambda(
-                    lambda_function_name, report_query, aws_access_key, aws_secret_key, aws_session_token
-                )
-                
-                if data and len(data) > 0:
-                    # Assuming hull_roughness_power_loss is the first (or only) key in the returned dict
-                    # And we want the first value if multiple are returned (e.g., if query returns multiple rows)
-                    excess_power_value = data[0].get('hull_roughness_power_loss')
-                    report_results.append({
-                        "Vessel Name": vessel_name,
-                        "Excess Power": excess_power_value if excess_power_value is not None else "N/A"
-                    })
-                else:
-                    report_results.append({
-                        "Vessel Name": vessel_name,
-                        "Excess Power": "No Data"
-                    })
-        
-        if report_results:
-            st.session_state.report_data = pd.DataFrame(report_results)
-            st.success("Report generated successfully!")
-        else:
-            st.error("No data found for the selected vessels to generate a report.")
+        missing_items.append("Select vessels")
+    if not all([aws_access_key, aws_secret_key, function_name]):
+        missing_items.append("Configure AWS credentials and Lambda Function Name")
+    
+    if missing_items:
+        st.warning(f"Please complete: {', '.join(missing_items)}")
 
 # --- Display Report ---
-if st.session_state.report_data is not None:
-    st.subheader("Performance Report:")
+if st.session_state.report_data is not None and not st.session_state.report_data.empty:
+    st.header("3. Report Results")
     st.dataframe(st.session_state.report_data, use_container_width=True)
-    
-    # Add download button for the report
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_filename = f"vessel_performance_report_{timestamp}.xlsx"
-    
-    excel_report_data = create_excel_download(st.session_state.report_data.to_dict(orient='records'), report_filename)
-    
-    if excel_report_data:
+    filename = f"excess_power_report_{timestamp}.xlsx"
+
+    excel_data = create_excel_download(st.session_state.report_data, filename)
+
+    if excel_data:
         st.download_button(
-            label="📥 Download Performance Report (Excel)",
-            data=excel_report_data,
-            file_name=report_filename,
+            label="📥 Download Report as Excel",
+            data=excel_data,
+            file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+elif st.session_state.report_data is not None and st.session_state.report_data.empty:
+    st.info("No data found for the selected vessels or query.")
 
 # --- Instructions ---
 with st.expander("📖 How to Use"):
@@ -242,13 +229,12 @@ with st.expander("📖 How to Use"):
     
     ### Step-by-step Guide:
     
-    1.  **Configure AWS**: Enter your AWS credentials (Access Key ID, Secret Access Key, and Session Token if applicable) and Lambda function name in the sidebar.
-    2.  **Vessel List Loads Automatically**: Once AWS config is valid, the vessel list will automatically load.
-    3.  **Select Vessels**: Use the multi-select dropdown to choose the vessels you want to include in the report. You can type to search.
-    4.  **Generate Report**: Click "Generate Performance Report" to fetch the `hull_roughness_power_loss` data for the selected vessels and display it in a table.
-    5.  **Download Report**: An Excel download button will appear below the report table.
+    1.  **Configure AWS**: Enter your AWS credentials and Lambda function name in the sidebar. Vessels will attempt to load automatically.
+    2.  **Select Vessels**: Use the multi-select dropdown to choose the vessels you want to include in the report. You can search within the dropdown.
+    3.  **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
+    4.  **Download**: If data is available, a download button will appear to get the report as an Excel file.
     """)
 
 # Footer
 st.markdown("---")
-st.markdown("*Built with Streamlit 🎈*")
+st.markdown("*Built with Streamlit 🎈 and AWS SDK*")
