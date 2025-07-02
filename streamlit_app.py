@@ -22,7 +22,7 @@ def fetch_vessels(api_url, query):
     """Fetch vessel list from Lambda API using a POST request with a SQL query."""
     try:
         headers = {'Content-Type': 'application/json'}
-        payload = {"sql_query": query} # Send the SQL query in the payload
+        payload = {"sql_query": query} # This payload is correct for fetching vessel names
         response = requests.post(api_url, data=json.dumps(payload), headers=headers)
         response.raise_for_status()
         return response.json()
@@ -30,14 +30,13 @@ def fetch_vessels(api_url, query):
         st.error(f"Error fetching vessels: {str(e)}")
         return []
 
-def query_vessel_data(api_url, sql_query_string): # Changed parameter name for clarity
+def query_vessel_data(api_url, query_payload): # Reverted to accepting query_payload
     """Send SQL query to Lambda API and get results"""
     try:
         headers = {'Content-Type': 'application/json'}
-        # The payload should ONLY contain 'sql_query' as per your Lambda
-        payload = {"sql_query": sql_query_string}
+        # This payload structure is what you indicated was working previously
         response = requests.post(api_url,
-                               data=json.dumps(payload), # Send the correct payload
+                               data=json.dumps(query_payload),
                                headers=headers)
         response.raise_for_status()
         return response.json()
@@ -191,9 +190,17 @@ if st.session_state.selected_vessels and base_query and query_api_url:
 
     if export_button:
         with st.spinner("Querying data..."):
-            # Prepare query payload for the main data query
-            # Pass only the preview_query string to query_vessel_data
-            result_data = query_vessel_data(query_api_url, preview_query)
+            # Prepare query payload - REVERTED to the original structure
+            # This structure includes 'sql_query' at the top level,
+            # along with other keys that your Lambda might be ignoring or using.
+            query_payload = {
+                "sql_query": preview_query, # Ensure 'sql_query' is present and correct
+                "vessel_names": vessel_names_list,
+                "selected_vessels": st.session_state.selected_vessels
+            }
+
+            # Execute query
+            result_data = query_vessel_data(query_api_url, query_payload)
 
             if result_data:
                 st.success("✅ Data retrieved successfully!")
