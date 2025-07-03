@@ -44,7 +44,7 @@ def invoke_lambda_function_url(lambda_url, payload):
             lambda_url, 
             headers=headers, 
             data=json_payload,
-            timeout=15  # Add explicit timeout
+            timeout=30  # Increased timeout to 30 seconds
         )
         
         st.info(f"Response status code: {response.status_code}")
@@ -83,24 +83,95 @@ def invoke_lambda_function_url(lambda_url, payload):
         return None
 
 # --- Data Fetching Functions ---
-@st.cache_data(ttl=3600) # Cache results for 1 hour to avoid re-fetching on every rerun
+@st.cache_data(ttl=3600)
 def fetch_all_vessels(lambda_url):
-    """Fetch all vessel names from Lambda function using its URL."""
-    query = "SELECT vessel_name FROM vessel_particulars"
-    st.info("Loading all vessel names...")
-    result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
+    """Fetch all vessel names from Lambda function using its URL with progressive fallbacks."""
+    # First try with a LIMIT to see if it's a size/timeout issue
+    test_query = "SELECT vessel_name FROM vessel_particulars LIMIT 10"
+    st.info("Testing vessel query with LIMIT 10...")
     
-    if result:
-        extracted_vessel_names = []
-        for item in result:
-            if isinstance(item, dict) and 'vessel_name' in item:
-                extracted_vessel_names.append(item['vessel_name'])
-            elif isinstance(item, str): # In case the Lambda returns a list of strings directly
-                extracted_vessel_names.append(item)
-        extracted_vessel_names.sort() # Sort for better display
-        st.success(f"Loaded {len(extracted_vessel_names)} vessels.")
-        return extracted_vessel_names
-    st.error("Failed to load vessel names.")
+    test_result = invoke_lambda_function_url(lambda_url, {"sql_query": test_query})
+    
+    if test_result:
+        st.success("Limited query successful, now trying with LIMIT 100...")
+        # Try with a larger limit
+        medium_query = "SELECT vessel_name FROM vessel_particulars LIMIT 100"
+        medium_result = invoke_lambda_function_url(lambda_url, {"sql_query": medium_query})
+        
+        if medium_result:
+            st.success("LIMIT 100 query successful, now trying with LIMIT 1000...")
+            # Try with an even larger limit
+            large_query = "SELECT vessel_name FROM vessel_particulars LIMIT 1000"
+            large_result = invoke_lambda_function_url(lambda_url, {"sql_query": large_query})
+            
+            if large_result:
+                extracted_vessel_names = []
+                for item in large_result:
+                    if isinstance(item, dict) and 'vessel_name' in item:
+                        extracted_vessel_names.append(item['vessel_name'])
+                    elif isinstance(item, str):
+                        extracted_vessel_names.append(item)
+                extracted_vessel_names.sort()
+                st.success(f"Loaded {len(extracted_vessel_names)} vessels.")
+                return extracted_vessel_names
+            else:
+                # Fall back to medium result
+                st.warning("LIMIT 1000 query failed, using LIMIT 100 results instead.")
+                extracted_vessel_names = []
+                for item in medium_result:
+                    if isinstance(item, dict) and 'vessel_name' in item:
+                        extracted_vessel_names.append(item['vessel_name'])
+                    elif isinstance(item, str):
+                        extracted_vessel_names.append(item)
+                extracted_vessel_names.sort()
+                return extracted_vessel_names
+        else:
+            # Fall back to test result
+            st.warning("LIMIT 100 query failed, using LIMIT 10 results instead.")
+            extracted_vessel_names = []
+            for item in test_result:
+                if isinstance(item, dict) and 'vessel_name' in item:
+                    extracted_vessel_names.append(item['vessel_name'])
+                elif isinstance(item, str):
+                    extracted_vessel_names.append(item)
+            extracted_vessel_names.sort()
+            return extracted_vessel_names
+    
+    # If all else fails, try a different approach - query for vessel count first
+    st.warning("All vessel queries failed. Trying alternative approach...")
+    count_query = "SELECT COUNT(*) as count FROM vessel_particulars"
+    count_result = invoke_lambda_function_url(lambda_url, {"sql_query": count_query})
+    
+    if count_result and isinstance(count_result, list) and len(count_result) > 0:
+        try:
+            vessel_count = int(count_result[0]['count'])
+            st.info(f"Found {vessel_count} vessels in database. Fetching in batches...")
+            
+            # Fetch in batches of 50
+            all_vessels = []
+            batch_size = 50
+            for offset in range(0, vessel_count, batch_size):
+                batch_query = f"SELECT vessel_name FROM vessel_particulars ORDER BY vessel_name LIMIT {batch_size} OFFSET {offset}"
+                st.info(f"Fetching batch {offset//batch_size + 1} of {(vessel_count + batch_size - 1)//batch_size}...")
+                
+                batch_result = invoke_lambda_function_url(lambda_url, {"sql_query": batch_query})
+                if batch_result:
+                    for item in batch_result:
+                        if isinstance(item, dict) and 'vessel_name' in item:
+                            all_vessels.append(item['vessel_name'])
+                        elif isinstance(item, str):
+                            all_vessels.append(item)
+                else:
+                    st.warning(f"Failed to fetch batch at offset {offset}")
+            
+            if all_vessels:
+                all_vessels.sort()
+                st.success(f"Loaded {len(all_vessels)} vessels using batch approach.")
+                return all_vessels
+        except (KeyError, ValueError, TypeError) as e:
+            st.error(f"Error processing count result: {str(e)}")
+    
+    st.error("Failed to load vessel names using all approaches.")
     return []
 
 def query_report_data(lambda_url, vessel_names):
@@ -108,20 +179,70 @@ def query_report_data(lambda_url, vessel_names):
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
 
-    quoted_vessel_names = [f"'{name}'" for name in vessel_names]
-    vessel_names_list_str = ", ".join(quoted_vessel_names)
+    # Process vessels in smaller batches to avoid timeout/size issues
+    batch_size = 10
+    all_hull_data = []
+    all_me_data = []
+    all_fuel_saving_data = []
+    
+    for i in range(0, len(vessel_names), batch_size):
+        batch_vessels = vessel_names[i:i+batch_size]
+        st.info(f"Processing batch {i//batch_size + 1} of {(len(vessel_names) + batch_size - 1)//batch_size} ({len(batch_vessels)} vessels)")
+        
+        quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
+        vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-    # --- Query 1: Hull Roughness Power Loss ---
-    sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
-    
-    st.info(f"Fetching Hull Roughness data for {len(vessel_names)} vessels...")
-    
-    hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
-    
+        # --- Query 1: Hull Roughness Power Loss ---
+        sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        
+        st.info(f"Fetching Hull Roughness data for batch...")
+        
+        hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
+        
+        if hull_result:
+            all_hull_data.extend(hull_result)
+        
+        # --- Query 2: ME SFOC ---
+        sql_query_me = f"""
+        SELECT
+            vp.vessel_name,
+            AVG(vps.me_sfoc) AS avg_me_sfoc
+        FROM
+            vessel_performance_summary vps
+        JOIN
+            vessel_particulars vp
+        ON
+            CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
+        WHERE
+            vp.vessel_name IN ({vessel_names_list_str})
+            AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+            AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
+        GROUP BY
+            vp.vessel_name;
+        """
+        
+        st.info(f"Fetching ME SFOC data for batch...")
+        
+        me_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_me})
+
+        if me_result:
+            all_me_data.extend(me_result)
+        
+        # --- Query 3: Potential Fuel Saving ---
+        sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        
+        st.info(f"Fetching Potential Fuel Saving data for batch...")
+        
+        fuel_saving_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_fuel_saving})
+
+        if fuel_saving_result:
+            all_fuel_saving_data.extend(fuel_saving_result)
+
+    # Process all collected data
     df_hull = pd.DataFrame()
-    if hull_result:
+    if all_hull_data:
         try:
-            df_hull = pd.DataFrame(hull_result)
+            df_hull = pd.DataFrame(all_hull_data)
             if 'hull_rough_power_loss_pct_ed' in df_hull.columns:
                 df_hull = df_hull.rename(columns={'hull_rough_power_loss_pct_ed': 'Hull Roughness Power Loss %'})
             else:
@@ -134,33 +255,10 @@ def query_report_data(lambda_url, vessel_names):
     else:
         st.error("Failed to retrieve hull roughness data.")
 
-    # --- Query 2: ME SFOC ---
-    sql_query_me = f"""
-    SELECT
-        vp.vessel_name,
-        AVG(vps.me_sfoc) AS avg_me_sfoc
-    FROM
-        vessel_performance_summary vps
-    JOIN
-        vessel_particulars vp
-    ON
-        CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
-    WHERE
-        vp.vessel_name IN ({vessel_names_list_str})
-        AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-        AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
-    GROUP BY
-        vp.vessel_name;
-    """
-    
-    st.info(f"Fetching ME SFOC data for {len(vessel_names)} vessels...")
-    
-    me_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_me})
-
     df_me = pd.DataFrame()
-    if me_result:
+    if all_me_data:
         try:
-            df_me = pd.DataFrame(me_result)
+            df_me = pd.DataFrame(all_me_data)
             if 'avg_me_sfoc' in df_me.columns:
                 df_me = df_me.rename(columns={'avg_me_sfoc': 'ME SFOC'})
             else:
@@ -173,17 +271,10 @@ def query_report_data(lambda_url, vessel_names):
     else:
         st.error("Failed to retrieve ME SFOC data.")
 
-    # --- Query 3: Potential Fuel Saving ---
-    sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
-    
-    st.info(f"Fetching Potential Fuel Saving data for {len(vessel_names)} vessels...")
-    
-    fuel_saving_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_fuel_saving})
-
     df_fuel_saving = pd.DataFrame()
-    if fuel_saving_result:
+    if all_fuel_saving_data:
         try:
-            df_fuel_saving = pd.DataFrame(fuel_saving_result)
+            df_fuel_saving = pd.DataFrame(all_fuel_saving_data)
             if 'hull_rough_excess_consumption_mt_ed' in df_fuel_saving.columns:
                 df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving'})
                 # Apply the capping logic: if > 5, set to 4.9; if < 0, set to 0
@@ -481,6 +572,7 @@ with st.expander("📖 How to Use"):
     
     - If vessel loading fails, check the Lambda Function URL in the sidebar.
     - Use the "Test Lambda Connection" button to verify connectivity.
+    - The app will try to load vessels in smaller batches if the full query fails.
     - Check the console logs for detailed error messages.
     """)
 
