@@ -82,7 +82,7 @@ def invoke_lambda_function_url(lambda_url, payload):
 @st.cache_data(ttl=3600) # Cache results for 1 hour to avoid re-fetching on every rerun
 def fetch_all_vessels(lambda_url):
     """Fetch all vessel names from Lambda function using its URL."""
-    query = "select vessel_name from vessel_particulars"
+    query = "SELECT vessel_name FROM vessel_particulars"
     st.info("Loading all vessel names...")
     result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
     
