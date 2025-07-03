@@ -32,50 +32,55 @@ if 'search_query' not in st.session_state:
 def invoke_lambda_function_url(lambda_url, payload):
     """Invoke Lambda function via its Function URL using HTTP POST."""
     st.info(f"Attempting to invoke Lambda URL: {lambda_url}")
-    st.info(f"Payload (Python dict) to be sent: {payload}") # Log the Python dictionary
     
     try:
         headers = {'Content-Type': 'application/json'}
-        # Convert the Python dictionary payload to a JSON string
-        json_payload_string = json.dumps(payload)
-        st.info(f"JSON string payload (sent as data): {json_payload_string}") # Log the JSON string
+        # Ensure payload is properly formatted
+        json_payload = json.dumps(payload)
         
-        response = requests.post(lambda_url, headers=headers, data=json_payload_string)
-        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
+        st.info(f"Sending payload: {json_payload}")
         
-        response_payload = response.json()
+        response = requests.post(
+            lambda_url, 
+            headers=headers, 
+            data=json_payload,
+            timeout=10  # Add explicit timeout
+        )
         
-        # Your Lambda function returns a JSON object with statusCode and body
-        if 'statusCode' in response_payload and 'body' in response_payload:
-            if response_payload['statusCode'] != 200:
-                st.error(f"Lambda returned error status: {response_payload.get('body', 'Unknown error')}")
-                return None
-            # The body itself might be a JSON string, so parse it again
-            if isinstance(response_payload['body'], str):
-                return json.loads(response_payload['body'])
-            else:
-                return response_payload['body']
-        else:
-            # If the Lambda directly returns the data without statusCode/body wrapper
-            return response_payload
+        st.info(f"Response status code: {response.status_code}")
+        st.info(f"Response headers: {response.headers}")
+        
+        # Try to get response text regardless of status code
+        try:
+            response_text = response.text
+            st.info(f"Response text (first 500 chars): {response_text[:500]}")
+        except:
+            st.warning("Could not get response text")
+        
+        # Now raise for status to handle errors
+        response.raise_for_status()
+        
+        # Try to parse JSON response
+        try:
+            return response.json()
+        except json.JSONDecodeError:
+            st.error(f"Response is not valid JSON: {response.text[:200]}...")
+            return None
             
     except requests.exceptions.HTTPError as http_err:
-        st.error(f"HTTP error invoking Lambda URL: {http_err} - Response: {http_err.response.text}") # Print full response text
+        st.error(f"HTTP error: {http_err}")
         return None
     except requests.exceptions.ConnectionError as conn_err:
-        st.error(f"Connection error invoking Lambda URL: {conn_err}. Check URL or network.")
+        st.error(f"Connection error: {conn_err}")
         return None
     except requests.exceptions.Timeout as timeout_err:
-        st.error(f"Timeout error invoking Lambda URL: {timeout_err}. Lambda might be taking too long.")
+        st.error(f"Timeout error: {timeout_err}")
         return None
     except requests.exceptions.RequestException as req_err:
-        st.error(f"An unexpected error occurred invoking Lambda URL: {req_err}")
-        return None
-    except json.JSONDecodeError as json_err:
-        st.error(f"Error decoding JSON response from Lambda: {json_err}. Response text: {response.text if 'response' in locals() else 'No response received'}")
+        st.error(f"Request error: {req_err}")
         return None
     except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
         return None
 
 # --- Data Fetching Functions (UPDATED TO USE NEW INVOKE FUNCTION) ---
