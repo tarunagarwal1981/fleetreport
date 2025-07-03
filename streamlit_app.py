@@ -363,7 +363,7 @@ st.markdown("Select vessels and generate a report on their excess power.")
 
 # --- Hardcode Lambda Function URL here ---
 # IMPORTANT: Replace this with YOUR actual Lambda Function URL
-LAMBDA_FUNCTION_URL = "https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/" 
+LAMBDA_FUNCTION_URL = "https://yrgj6p4lt5sgv6endohhedmnmq0eftti.lambda-url.ap-south-1.on.aws/" 
 
 # Sidebar for Configuration (now only Lambda URL)
 with st.sidebar:
