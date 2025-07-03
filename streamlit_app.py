@@ -32,9 +32,6 @@ if 'search_query' not in st.session_state:
 def invoke_lambda_function_url(lambda_url, payload):
     """Invoke Lambda function via its Function URL using HTTP POST."""
     try:
-        st.write(f"Attempting to invoke Lambda URL: {lambda_url}")
-        st.write(f"Sending payload: {json.dumps(payload)}")
-        
         headers = {'Content-Type': 'application/json'}
         json_payload = json.dumps(payload)
         
@@ -44,9 +41,6 @@ def invoke_lambda_function_url(lambda_url, payload):
             data=json_payload,
             timeout=30
         )
-        
-        st.write(f"Response status code: {response.status_code}")
-        st.write(f"Response text preview: {response.text[:200]}...")
         
         if response.status_code != 200:
             st.error(f"HTTP error: {response.status_code} {response.reason} for url: {lambda_url}")
@@ -114,8 +108,8 @@ def query_report_data(lambda_url, vessel_names):
         quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
         vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-        # --- Query 1: Hull Roughness Power Loss ---
-        sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        # --- Query 1: Hull Roughness Power Loss --- (REMOVED SEMICOLON)
+        sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
         
         st.info(f"Fetching Hull Roughness data for batch...")
         
@@ -124,7 +118,7 @@ def query_report_data(lambda_url, vessel_names):
         if hull_result:
             all_hull_data.extend(hull_result)
         
-        # --- Query 2: ME SFOC --- (FIXED QUERY)
+        # --- Query 2: ME SFOC --- (FIXED QUERY, REMOVED SEMICOLON)
         sql_query_me = f"""
 SELECT
     vp.vessel_name,
@@ -140,7 +134,7 @@ WHERE
     AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
     AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
 GROUP BY
-    vp.vessel_name;
+    vp.vessel_name
 """
         
         st.info(f"Fetching ME SFOC data for batch...")
@@ -150,8 +144,8 @@ GROUP BY
         if me_result:
             all_me_data.extend(me_result)
         
-        # --- Query 3: Potential Fuel Saving ---
-        sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        # --- Query 3: Potential Fuel Saving --- (REMOVED SEMICOLON)
+        sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
         
         st.info(f"Fetching Potential Fuel Saving data for batch...")
         
