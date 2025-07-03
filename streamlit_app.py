@@ -1,5 +1,5 @@
 import streamlit as st
-import requests # We'll use this for HTTP requests
+import requests
 import pandas as pd
 import json
 import io
@@ -28,12 +28,19 @@ if 'report_data' not in st.session_state:
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 
-# --- Lambda Invocation Helper (UPDATED TO USE FUNCTION URL) ---
+# --- Lambda Invocation Helper (UPDATED WITH DIAGNOSTIC LOGGING) ---
 def invoke_lambda_function_url(lambda_url, payload):
     """Invoke Lambda function via its Function URL using HTTP POST."""
+    st.info(f"Attempting to invoke Lambda URL: {lambda_url}")
+    st.info(f"Payload (Python dict) to be sent: {payload}") # Log the Python dictionary
+    
     try:
         headers = {'Content-Type': 'application/json'}
-        response = requests.post(lambda_url, headers=headers, data=json.dumps(payload))
+        # Convert the Python dictionary payload to a JSON string
+        json_payload_string = json.dumps(payload)
+        st.info(f"JSON string payload (sent as data): {json_payload_string}") # Log the JSON string
+        
+        response = requests.post(lambda_url, headers=headers, data=json_payload_string)
         response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         
         response_payload = response.json()
@@ -53,7 +60,7 @@ def invoke_lambda_function_url(lambda_url, payload):
             return response_payload
             
     except requests.exceptions.HTTPError as http_err:
-        st.error(f"HTTP error invoking Lambda URL: {http_err} - Response: {response.text}")
+        st.error(f"HTTP error invoking Lambda URL: {http_err} - Response: {http_err.response.text}") # Print full response text
         return None
     except requests.exceptions.ConnectionError as conn_err:
         st.error(f"Connection error invoking Lambda URL: {conn_err}. Check URL or network.")
@@ -65,7 +72,7 @@ def invoke_lambda_function_url(lambda_url, payload):
         st.error(f"An unexpected error occurred invoking Lambda URL: {req_err}")
         return None
     except json.JSONDecodeError as json_err:
-        st.error(f"Error decoding JSON response from Lambda: {json_err}. Response text: {response.text}")
+        st.error(f"Error decoding JSON response from Lambda: {json_err}. Response text: {response.text if 'response' in locals() else 'No response received'}")
         return None
     except Exception as e:
         st.error(f"An unexpected error occurred: {str(e)}")
@@ -357,7 +364,6 @@ st.markdown("Select vessels and generate a report on their excess power.")
 # --- Hardcode Lambda Function URL here ---
 # IMPORTANT: Replace this with YOUR actual Lambda Function URL
 LAMBDA_FUNCTION_URL = "https://6mfmavicpuezjic6mtwtbuw56e0pjysg.lambda-url.ap-south-1.on.aws/" 
-# Example: "https://xxxxxxxxxxxx.lambda-url.ap-south-1.on.aws/"
 
 # Sidebar for Configuration (now only Lambda URL)
 with st.sidebar:
@@ -474,7 +480,7 @@ with st.expander("📖 How to Use"):
     
     ### Step-by-step Guide:
     
-    1.  **Configure Lambda URL**: Replace `"YOUR_LAMBDA_FUNCTION_URL_HERE"` in the Python code with your actual Lambda Function URL.
+    1.  **Configure Lambda URL**: The Lambda Function URL is hardcoded in this script. Ensure it's correct.
     2.  **Select Vessels**: Use the search bar to filter vessels, then check the boxes to select them.
     3.  **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
     4.  **Download**: If data is available, a download button will appear to get the report as an Excel file.
