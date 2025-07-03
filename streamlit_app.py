@@ -28,7 +28,7 @@ if 'report_data' not in st.session_state:
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 
-# --- Lambda Invocation Helper (UPDATED WITH DIAGNOSTIC LOGGING) ---
+# --- Lambda Invocation Helper (IMPROVED WITH BETTER ERROR HANDLING) ---
 def invoke_lambda_function_url(lambda_url, payload):
     """Invoke Lambda function via its Function URL using HTTP POST."""
     st.info(f"Attempting to invoke Lambda URL: {lambda_url}")
@@ -44,16 +44,15 @@ def invoke_lambda_function_url(lambda_url, payload):
             lambda_url, 
             headers=headers, 
             data=json_payload,
-            timeout=10  # Add explicit timeout
+            timeout=15  # Add explicit timeout
         )
         
         st.info(f"Response status code: {response.status_code}")
-        st.info(f"Response headers: {response.headers}")
         
         # Try to get response text regardless of status code
         try:
-            response_text = response.text
-            st.info(f"Response text (first 500 chars): {response_text[:500]}")
+            response_text = response.text[:500]  # First 500 chars to avoid flooding the UI
+            st.info(f"Response text preview: {response_text}...")
         except:
             st.warning("Could not get response text")
         
@@ -83,7 +82,7 @@ def invoke_lambda_function_url(lambda_url, payload):
         st.error(f"Unexpected error: {str(e)}")
         return None
 
-# --- Data Fetching Functions (UPDATED TO USE NEW INVOKE FUNCTION) ---
+# --- Data Fetching Functions ---
 @st.cache_data(ttl=3600) # Cache results for 1 hour to avoid re-fetching on every rerun
 def fetch_all_vessels(lambda_url):
     """Fetch all vessel names from Lambda function using its URL."""
@@ -116,7 +115,6 @@ def query_report_data(lambda_url, vessel_names):
     sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
     
     st.info(f"Fetching Hull Roughness data for {len(vessel_names)} vessels...")
-    st.code(sql_query_hull, language="sql")
     
     hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
     
@@ -132,7 +130,6 @@ def query_report_data(lambda_url, vessel_names):
             df_hull = df_hull.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
             st.error(f"Error processing hull data: {str(e)}")
-            st.json(hull_result)
             df_hull = pd.DataFrame()
     else:
         st.error("Failed to retrieve hull roughness data.")
@@ -157,8 +154,7 @@ def query_report_data(lambda_url, vessel_names):
     """
     
     st.info(f"Fetching ME SFOC data for {len(vessel_names)} vessels...")
-    st.code(sql_query_me, language="sql")
-
+    
     me_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_me})
 
     df_me = pd.DataFrame()
@@ -173,7 +169,6 @@ def query_report_data(lambda_url, vessel_names):
             df_me = df_me.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
             st.error(f"Error processing ME data: {str(e)}")
-            st.json(me_result)
             df_me = pd.DataFrame()
     else:
         st.error("Failed to retrieve ME SFOC data.")
@@ -182,8 +177,7 @@ def query_report_data(lambda_url, vessel_names):
     sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
     
     st.info(f"Fetching Potential Fuel Saving data for {len(vessel_names)} vessels...")
-    st.code(sql_query_fuel_saving, language="sql")
-
+    
     fuel_saving_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_fuel_saving})
 
     df_fuel_saving = pd.DataFrame()
@@ -202,7 +196,6 @@ def query_report_data(lambda_url, vessel_names):
             df_fuel_saving = df_fuel_saving.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
             st.error(f"Error processing fuel saving data: {str(e)}")
-            st.json(fuel_saving_result)
             df_fuel_saving = pd.DataFrame()
     else:
         st.error("Failed to retrieve Potential Fuel Saving data.")
@@ -367,28 +360,35 @@ st.title("🚢 Vessel Performance Report Tool")
 st.markdown("Select vessels and generate a report on their excess power.")
 
 # --- Hardcode Lambda Function URL here ---
-# IMPORTANT: Replace this with YOUR actual Lambda Function URL
 LAMBDA_FUNCTION_URL = "https://yrgj6p4lt5sgv6endohhedmnmq0eftti.lambda-url.ap-south-1.on.aws/" 
 
-# Sidebar for Configuration (now only Lambda URL)
+# Sidebar for Configuration
 with st.sidebar:
     st.header("Configuration")
     
     # Display the hardcoded URL, or allow input if you prefer
-    st.text_input(
+    lambda_url = st.text_input(
         "Lambda Function URL",
         value=LAMBDA_FUNCTION_URL,
-        disabled=True, # Disable editing if hardcoded
         help="The URL of your AWS Lambda Function (Auth type: NONE)"
     )
     
+    # Add a test connection button
+    if st.button("Test Lambda Connection"):
+        test_result = invoke_lambda_function_url(
+            lambda_url, 
+            {"sql_query": "SELECT 1 as test"}
+        )
+        if test_result:
+            st.success("✅ Connection successful!")
+        else:
+            st.error("❌ Connection failed. Check URL and Lambda configuration.")
+    
     st.info("💡 **Lambda Function URL**: This is the HTTP endpoint for your Lambda. Ensure its 'Auth type' is set to 'NONE' for public access.")
-    st.warning("⚠️ **Security Note**: A Lambda Function URL with 'Auth type: NONE' is publicly accessible. Ensure your Lambda's IAM role has minimal necessary permissions to prevent unauthorized data access.")
 
-# --- Automatic Vessel Loading ---
-# Now only depends on the LAMBDA_FUNCTION_URL being set
-if LAMBDA_FUNCTION_URL != "YOUR_LAMBDA_FUNCTION_URL_HERE" and not st.session_state.vessels:
-    st.session_state.vessels = fetch_all_vessels(LAMBDA_FUNCTION_URL)
+# --- Vessel Loading ---
+if st.button("Load Vessels") or (st.session_state.vessels and lambda_url == LAMBDA_FUNCTION_URL):
+    st.session_state.vessels = fetch_all_vessels(lambda_url)
 
 # --- Main Content Area ---
 st.header("1. Select Vessels")
@@ -428,27 +428,20 @@ if st.session_state.vessels:
     
     selected_vessels_list = list(st.session_state.selected_vessels)
 else:
-    st.warning("Please configure the Lambda Function URL to load vessels.")
+    st.info("Click 'Load Vessels' to fetch vessel names from the database.")
     selected_vessels_list = []
 
 st.header("2. Generate Report")
 
-if selected_vessels_list and LAMBDA_FUNCTION_URL != "YOUR_LAMBDA_FUNCTION_URL_HERE":
+if selected_vessels_list:
     if st.button("🚀 Generate Excess Power Report", type="primary"):
         with st.spinner("Generating report..."):
             st.session_state.report_data = query_report_data(
-                LAMBDA_FUNCTION_URL, 
+                lambda_url, 
                 selected_vessels_list
             )
 else:
-    missing_items = []
-    if not selected_vessels_list:
-        missing_items.append("Select vessels")
-    if LAMBDA_FUNCTION_URL == "YOUR_LAMBDA_FUNCTION_URL_HERE":
-        missing_items.append("Configure Lambda Function URL")
-    
-    if missing_items:
-        st.warning(f"Please complete: {', '.join(missing_items)}")
+    st.warning("Please select at least one vessel to generate a report.")
 
 # --- Display Report ---
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
@@ -477,20 +470,20 @@ elif st.session_state.report_data is not None and st.session_state.report_data.e
 # --- Instructions ---
 with st.expander("📖 How to Use"):
     st.markdown("""
-    ### Setup Requirements:
-    
-    1.  **Lambda Function URL**: You need the public URL of your AWS Lambda function.
-        *   **Important**: Ensure your Lambda Function URL has its 'Auth type' set to **NONE** for this application to access it.
-        *   **Security Note**: A Lambda Function URL with 'Auth type: NONE' is publicly accessible. Ensure your Lambda's IAM role has minimal necessary permissions (e.g., only `SELECT` on your database tables) to prevent unauthorized data access.
-    
     ### Step-by-step Guide:
     
-    1.  **Configure Lambda URL**: The Lambda Function URL is hardcoded in this script. Ensure it's correct.
-    2.  **Select Vessels**: Use the search bar to filter vessels, then check the boxes to select them.
-    3.  **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
-    4.  **Download**: If data is available, a download button will appear to get the report as an Excel file.
+    1. **Load Vessels**: Click the "Load Vessels" button to fetch all vessel names from the database.
+    2. **Select Vessels**: Use the search bar to filter vessels, then check the boxes to select them.
+    3. **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
+    4. **Download**: If data is available, a download button will appear to get the report as an Excel file.
+    
+    ### Troubleshooting:
+    
+    - If vessel loading fails, check the Lambda Function URL in the sidebar.
+    - Use the "Test Lambda Connection" button to verify connectivity.
+    - Check the console logs for detailed error messages.
     """)
 
 # Footer
 st.markdown("---")
-st.markdown("*Built with Streamlit 🎈 and Python Requests*")
+st.markdown("*Built with Streamlit 🎈 and Python*")
