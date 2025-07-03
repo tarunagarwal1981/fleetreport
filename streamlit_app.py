@@ -1,5 +1,5 @@
 import streamlit as st
-import boto3
+import requests # We'll use this for HTTP requests
 import pandas as pd
 import json
 import io
@@ -20,67 +20,64 @@ st.set_page_config(
 if 'vessels' not in st.session_state:
     st.session_state.vessels = []
 
-# --- FIX START ---
-# Ensure selected_vessels is always a set
 if 'selected_vessels' not in st.session_state or not isinstance(st.session_state.selected_vessels, set):
-    # If it's not in session state, or if it's not a set (e.g., it's a list from a previous run),
-    # re-initialize it as an empty set.
-    # If it was a list with values, you might want to convert them: set(st.session_state.selected_vessels)
-    # But for robustness and to clear potential bad state, an empty set is safer.
     st.session_state.selected_vessels = set()
-# --- FIX END ---
 
 if 'report_data' not in st.session_state:
     st.session_state.report_data = None
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 
-# --- Lambda Invocation Helper ---
-def invoke_lambda_function(function_name, payload, aws_access_key, aws_secret_key, aws_session_token=None, region='ap-south-1'):
-    """Invoke Lambda function directly using AWS SDK"""
+# --- Lambda Invocation Helper (UPDATED TO USE FUNCTION URL) ---
+def invoke_lambda_function_url(lambda_url, payload):
+    """Invoke Lambda function via its Function URL using HTTP POST."""
     try:
-        lambda_client = boto3.client(
-            'lambda',
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            aws_session_token=aws_session_token,
-            region_name=region
-        )
+        headers = {'Content-Type': 'application/json'}
+        response = requests.post(lambda_url, headers=headers, data=json.dumps(payload))
+        response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         
-        response = lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType='RequestResponse',
-            Payload=json.dumps(payload)
-        )
+        response_payload = response.json()
         
-        response_payload = json.loads(response['Payload'].read())
-        
-        if response.get('StatusCode') == 200:
-            if 'statusCode' in response_payload and 'body' in response_payload:
-                if response_payload['statusCode'] != 200:
-                    st.error(f"Lambda returned error status: {response_payload.get('body', 'Unknown error')}")
-                    return None
-                if isinstance(response_payload['body'], str):
-                    return json.loads(response_payload['body'])
-                else:
-                    return response_payload['body']
+        # Your Lambda function returns a JSON object with statusCode and body
+        if 'statusCode' in response_payload and 'body' in response_payload:
+            if response_payload['statusCode'] != 200:
+                st.error(f"Lambda returned error status: {response_payload.get('body', 'Unknown error')}")
+                return None
+            # The body itself might be a JSON string, so parse it again
+            if isinstance(response_payload['body'], str):
+                return json.loads(response_payload['body'])
             else:
-                return response_payload
+                return response_payload['body']
         else:
-            st.error(f"AWS invoke error (non-200 status from AWS API): {response_payload}")
-            return None
+            # If the Lambda directly returns the data without statusCode/body wrapper
+            return response_payload
             
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"HTTP error invoking Lambda URL: {http_err} - Response: {response.text}")
+        return None
+    except requests.exceptions.ConnectionError as conn_err:
+        st.error(f"Connection error invoking Lambda URL: {conn_err}. Check URL or network.")
+        return None
+    except requests.exceptions.Timeout as timeout_err:
+        st.error(f"Timeout error invoking Lambda URL: {timeout_err}. Lambda might be taking too long.")
+        return None
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"An unexpected error occurred invoking Lambda URL: {req_err}")
+        return None
+    except json.JSONDecodeError as json_err:
+        st.error(f"Error decoding JSON response from Lambda: {json_err}. Response text: {response.text}")
+        return None
     except Exception as e:
-        st.error(f"Error invoking Lambda: {str(e)}")
+        st.error(f"An unexpected error occurred: {str(e)}")
         return None
 
-# --- Data Fetching Functions ---
+# --- Data Fetching Functions (UPDATED TO USE NEW INVOKE FUNCTION) ---
 @st.cache_data(ttl=3600) # Cache results for 1 hour to avoid re-fetching on every rerun
-def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session_token):
-    """Fetch all vessel names from Lambda function."""
+def fetch_all_vessels(lambda_url):
+    """Fetch all vessel names from Lambda function using its URL."""
     query = "select vessel_name from vessel_particulars"
     st.info("Loading all vessel names...")
-    result = invoke_lambda_function(function_name, {"sql_query": query}, aws_access_key, aws_secret_key, aws_session_token)
+    result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
     
     if result:
         extracted_vessel_names = []
@@ -95,7 +92,7 @@ def fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session
     st.error("Failed to load vessel names.")
     return []
 
-def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_key, aws_session_token):
+def query_report_data(lambda_url, vessel_names):
     """Fetch hull roughness power loss, ME SFOC, and Potential Fuel Saving for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame() # Return empty DataFrame if no vessels selected
@@ -109,7 +106,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     st.info(f"Fetching Hull Roughness data for {len(vessel_names)} vessels...")
     st.code(sql_query_hull, language="sql")
     
-    hull_result = invoke_lambda_function(function_name, {"sql_query": sql_query_hull}, aws_access_key, aws_secret_key, aws_session_token)
+    hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
     
     df_hull = pd.DataFrame()
     if hull_result:
@@ -150,7 +147,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     st.info(f"Fetching ME SFOC data for {len(vessel_names)} vessels...")
     st.code(sql_query_me, language="sql")
 
-    me_result = invoke_lambda_function(function_name, {"sql_query": sql_query_me}, aws_access_key, aws_secret_key, aws_session_token)
+    me_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_me})
 
     df_me = pd.DataFrame()
     if me_result:
@@ -175,7 +172,7 @@ def query_report_data(function_name, vessel_names, aws_access_key, aws_secret_ke
     st.info(f"Fetching Potential Fuel Saving data for {len(vessel_names)} vessels...")
     st.code(sql_query_fuel_saving, language="sql")
 
-    fuel_saving_result = invoke_lambda_function(function_name, {"sql_query": sql_query_fuel_saving}, aws_access_key, aws_secret_key, aws_session_token)
+    fuel_saving_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_fuel_saving})
 
     df_fuel_saving = pd.DataFrame()
     if fuel_saving_result:
@@ -357,41 +354,30 @@ def create_excel_download_with_styling(df, filename):
 st.title("🚢 Vessel Performance Report Tool")
 st.markdown("Select vessels and generate a report on their excess power.")
 
-# Sidebar for AWS Configuration
+# --- Hardcode Lambda Function URL here ---
+# IMPORTANT: Replace this with YOUR actual Lambda Function URL
+LAMBDA_FUNCTION_URL = "YOUR_LAMBDA_FUNCTION_URL_HERE" 
+# Example: "https://xxxxxxxxxxxx.lambda-url.ap-south-1.on.aws/"
+
+# Sidebar for Configuration (now only Lambda URL)
 with st.sidebar:
-    st.header("AWS Configuration")
+    st.header("Configuration")
     
-    aws_access_key = st.text_input(
-        "AWS Access Key ID",
-        type="password",
-        help="Your AWS Access Key ID"
+    # Display the hardcoded URL, or allow input if you prefer
+    st.text_input(
+        "Lambda Function URL",
+        value=LAMBDA_FUNCTION_URL,
+        disabled=True, # Disable editing if hardcoded
+        help="The URL of your AWS Lambda Function (Auth type: NONE)"
     )
     
-    aws_secret_key = st.text_input(
-        "AWS Secret Access Key",
-        type="password",
-        help="Your AWS Secret Access Key"
-    )
-    
-    aws_session_token = st.text_input(
-        "AWS Session Token (Optional)",
-        type="password",
-        help="Required if using temporary credentials (e.g., from STS AssumeRole)"
-    )
-    
-    function_name = st.text_input(
-        "Lambda Function Name",
-        value="",
-        help="The name of your Lambda function (e.g., 'my-vessel-query-function')"
-    )
-    
-    st.info("💡 **Function Name**: Find this in your AWS Lambda console. It's the name, not the full ARN or URL.")
-    st.warning("⚠️ **Permissions**: Ensure the provided AWS credentials have `lambda:InvokeFunction` permission on your Lambda.")
+    st.info("💡 **Lambda Function URL**: This is the HTTP endpoint for your Lambda. Ensure its 'Auth type' is set to 'NONE' for public access.")
+    st.warning("⚠️ **Security Note**: A Lambda Function URL with 'Auth type: NONE' is publicly accessible. Ensure your Lambda's IAM role has minimal necessary permissions to prevent unauthorized data access.")
 
 # --- Automatic Vessel Loading ---
-# Only attempt to fetch if credentials and function name are provided
-if all([aws_access_key, aws_secret_key, function_name]) and not st.session_state.vessels:
-    st.session_state.vessels = fetch_all_vessels(function_name, aws_access_key, aws_secret_key, aws_session_token)
+# Now only depends on the LAMBDA_FUNCTION_URL being set
+if LAMBDA_FUNCTION_URL != "YOUR_LAMBDA_FUNCTION_URL_HERE" and not st.session_state.vessels:
+    st.session_state.vessels = fetch_all_vessels(LAMBDA_FUNCTION_URL)
 
 # --- Main Content Area ---
 st.header("1. Select Vessels")
@@ -416,8 +402,6 @@ if st.session_state.vessels:
     with st.container(height=300, border=True):
         if filtered_vessels:
             for vessel in filtered_vessels:
-                # Use a unique key for each checkbox
-                # Ensure the key is unique across all runs, f-string with vessel name is good.
                 checkbox_state = st.checkbox(
                     vessel, 
                     value=(vessel in st.session_state.selected_vessels),
@@ -431,30 +415,26 @@ if st.session_state.vessels:
         else:
             st.info("No vessels match your search query.")
     
-    # Convert set back to list for query function
     selected_vessels_list = list(st.session_state.selected_vessels)
 else:
-    st.warning("Please provide AWS credentials and Lambda Function Name in the sidebar to load vessels.")
-    selected_vessels_list = [] # Ensure it's an empty list if no vessels loaded
+    st.warning("Please configure the Lambda Function URL to load vessels.")
+    selected_vessels_list = []
 
 st.header("2. Generate Report")
 
-if selected_vessels_list and all([aws_access_key, aws_secret_key, function_name]):
+if selected_vessels_list and LAMBDA_FUNCTION_URL != "YOUR_LAMBDA_FUNCTION_URL_HERE":
     if st.button("🚀 Generate Excess Power Report", type="primary"):
         with st.spinner("Generating report..."):
             st.session_state.report_data = query_report_data(
-                function_name, 
-                selected_vessels_list, # Pass the list
-                aws_access_key, 
-                aws_secret_key, 
-                aws_session_token
+                LAMBDA_FUNCTION_URL, 
+                selected_vessels_list
             )
 else:
     missing_items = []
     if not selected_vessels_list:
         missing_items.append("Select vessels")
-    if not all([aws_access_key, aws_secret_key, function_name]):
-        missing_items.append("Configure AWS credentials and Lambda Function Name")
+    if LAMBDA_FUNCTION_URL == "YOUR_LAMBDA_FUNCTION_URL_HERE":
+        missing_items.append("Configure Lambda Function URL")
     
     if missing_items:
         st.warning(f"Please complete: {', '.join(missing_items)}")
@@ -463,7 +443,6 @@ else:
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
     st.header("3. Report Results")
     
-    # Apply styling for Streamlit dataframe
     styled_df = st.session_state.report_data.style.apply(
         style_condition_columns, axis=1
     )
@@ -489,14 +468,13 @@ with st.expander("📖 How to Use"):
     st.markdown("""
     ### Setup Requirements:
     
-    1.  **AWS Credentials**: You need AWS Access Key ID, Secret Access Key, and optionally a Session Token.
-        *   **Access Key ID & Secret Access Key**: These are long-term credentials for an IAM user.
-        *   **Session Token**: This is required if your credentials are *temporary* (e.g., obtained from AWS STS `AssumeRole` or from an EC2 instance role). If you're using long-term IAM user keys, you typically won't have a session token.
-    2.  **Lambda Function Name**: The actual name of your Lambda function (e.g., `my-vessel-query-function`).
+    1.  **Lambda Function URL**: You need the public URL of your AWS Lambda function.
+        *   **Important**: Ensure your Lambda Function URL has its 'Auth type' set to **NONE** for this application to access it.
+        *   **Security Note**: A Lambda Function URL with 'Auth type: NONE' is publicly accessible. Ensure your Lambda's IAM role has minimal necessary permissions (e.g., only `SELECT` on your database tables) to prevent unauthorized data access.
     
     ### Step-by-step Guide:
     
-    1.  **Configure AWS**: Enter your AWS credentials and Lambda function name in the sidebar. Vessels will attempt to load automatically.
+    1.  **Configure Lambda URL**: Replace `"YOUR_LAMBDA_FUNCTION_URL_HERE"` in the Python code with your actual Lambda Function URL.
     2.  **Select Vessels**: Use the search bar to filter vessels, then check the boxes to select them.
     3.  **Generate Report**: Click "Generate Excess Power Report" to fetch the data and display it.
     4.  **Download**: If data is available, a download button will appear to get the report as an Excel file.
@@ -504,4 +482,4 @@ with st.expander("📖 How to Use"):
 
 # Footer
 st.markdown("---")
-st.markdown("*Built with Streamlit 🎈 and AWS SDK*")
+st.markdown("*Built with Streamlit 🎈 and Python Requests*")
