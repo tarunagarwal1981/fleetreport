@@ -32,6 +32,9 @@ if 'search_query' not in st.session_state:
 def invoke_lambda_function_url(lambda_url, payload):
     """Invoke Lambda function via its Function URL using HTTP POST."""
     try:
+        st.write(f"Attempting to invoke Lambda URL: {lambda_url}")
+        st.write(f"Sending payload: {json.dumps(payload)}")
+        
         headers = {'Content-Type': 'application/json'}
         json_payload = json.dumps(payload)
         
@@ -42,7 +45,13 @@ def invoke_lambda_function_url(lambda_url, payload):
             timeout=30
         )
         
-        response.raise_for_status()
+        st.write(f"Response status code: {response.status_code}")
+        st.write(f"Response text preview: {response.text[:200]}...")
+        
+        if response.status_code != 200:
+            st.error(f"HTTP error: {response.status_code} {response.reason} for url: {lambda_url}")
+            return None
+            
         return response.json()
             
     except requests.exceptions.HTTPError as http_err:
@@ -95,53 +104,61 @@ def query_report_data(lambda_url, vessel_names):
     all_me_data = []
     all_fuel_saving_data = []
     
-    progress_bar = st.progress(0)
     total_batches = (len(vessel_names) + batch_size - 1) // batch_size
     
     for i in range(0, len(vessel_names), batch_size):
         batch_vessels = vessel_names[i:i+batch_size]
         batch_num = i//batch_size + 1
-        progress_bar.progress(batch_num / total_batches)
+        st.info(f"Processing batch {batch_num} of {total_batches} ({len(batch_vessels)} vessels)")
         
         quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
         vessel_names_list_str = ", ".join(quoted_vessel_names)
 
         # --- Query 1: Hull Roughness Power Loss ---
         sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        
+        st.info(f"Fetching Hull Roughness data for batch...")
+        
         hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
+        
         if hull_result:
             all_hull_data.extend(hull_result)
         
-        # --- Query 2: ME SFOC --- (FIXED OPERATORS)
+        # --- Query 2: ME SFOC --- (FIXED QUERY)
         sql_query_me = f"""
-        SELECT
-            vp.vessel_name,
-            AVG(vps.me_sfoc) AS avg_me_sfoc
-        FROM
-            vessel_performance_summary vps
-        JOIN
-            vessel_particulars vp
-        ON
-            CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
-        WHERE
-            vp.vessel_name IN ({vessel_names_list_str})
-            AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-            AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
-        GROUP BY
-            vp.vessel_name;
-        """
+SELECT
+    vp.vessel_name,
+    AVG(vps.me_sfoc) AS avg_me_sfoc
+FROM
+    vessel_performance_summary vps
+JOIN
+    vessel_particulars vp
+ON
+    CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
+WHERE
+    vp.vessel_name IN ({vessel_names_list_str})
+    AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+    AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY
+    vp.vessel_name;
+"""
+        
+        st.info(f"Fetching ME SFOC data for batch...")
+        
         me_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_me})
+
         if me_result:
             all_me_data.extend(me_result)
         
         # --- Query 3: Potential Fuel Saving ---
         sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str});"
+        
+        st.info(f"Fetching Potential Fuel Saving data for batch...")
+        
         fuel_saving_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_fuel_saving})
+
         if fuel_saving_result:
             all_fuel_saving_data.extend(fuel_saving_result)
-
-    progress_bar.progress(1.0)
-    progress_bar.empty()
 
     # Process all collected data
     df_hull = pd.DataFrame()
@@ -156,6 +173,8 @@ def query_report_data(lambda_url, vessel_names):
         except Exception as e:
             st.error(f"Error processing hull data: {str(e)}")
             df_hull = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve hull roughness data.")
 
     df_me = pd.DataFrame()
     if all_me_data:
@@ -169,6 +188,8 @@ def query_report_data(lambda_url, vessel_names):
         except Exception as e:
             st.error(f"Error processing ME data: {str(e)}")
             df_me = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve ME SFOC data.")
 
     df_fuel_saving = pd.DataFrame()
     if all_fuel_saving_data:
@@ -186,6 +207,8 @@ def query_report_data(lambda_url, vessel_names):
         except Exception as e:
             st.error(f"Error processing fuel saving data: {str(e)}")
             df_fuel_saving = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve Potential Fuel Saving data.")
 
     # --- Merge DataFrames ---
     df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
@@ -259,6 +282,7 @@ def query_report_data(lambda_url, vessel_names):
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
     df_final = df_final[existing_and_ordered_columns]
 
+    st.success("Report data retrieved and processed successfully!")
     return df_final
 
 # --- Styling for Streamlit DataFrame ---
