@@ -1,4 +1,5 @@
-import streamlit as st
+# Create the complete updated Python code with comprehensive debug statements
+code_content = '''import streamlit as st
 import requests
 import pandas as pd
 import json
@@ -92,6 +93,9 @@ def query_report_data(lambda_url, vessel_names):
     if not vessel_names:
         return pd.DataFrame()
 
+    # DEBUG: Show selected vessels
+    st.write("🔍 DEBUG: Selected vessels:", vessel_names[:5], f"... (total: {len(vessel_names)})")
+
     # Process vessels in smaller batches to avoid timeout/size issues
     batch_size = 10
     all_hull_data = []
@@ -118,6 +122,7 @@ def query_report_data(lambda_url, vessel_names):
         
         if hull_result:
             all_hull_data.extend(hull_result)
+            st.write(f"🔍 DEBUG: Hull data batch {batch_num} - got {len(hull_result)} records")
         
         # --- Query 2: ME SFOC ---
         sql_query_me = f"""
@@ -144,6 +149,7 @@ GROUP BY
 
         if me_result:
             all_me_data.extend(me_result)
+            st.write(f"🔍 DEBUG: ME SFOC data batch {batch_num} - got {len(me_result)} records")
         
         # --- Query 3: Potential Fuel Saving ---
         sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
@@ -154,6 +160,7 @@ GROUP BY
 
         if fuel_saving_result:
             all_fuel_saving_data.extend(fuel_saving_result)
+            st.write(f"🔍 DEBUG: Fuel saving data batch {batch_num} - got {len(fuel_saving_result)} records")
 
         # --- Query 4: YTD CII --- (FIXED QUERY WITH TRIM)
         sql_query_cii = f"""
@@ -170,14 +177,24 @@ WHERE
     vp.vessel_name IN ({vessel_names_list_str})
 """
         st.info(f"Fetching YTD CII data for batch...")
+        st.write(f"🔍 DEBUG: CII Query for batch {batch_num}:")
+        st.code(sql_query_cii)
         
         cii_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_cii})
 
         if cii_result:
             all_cii_data.extend(cii_result)
-            st.success(f"Retrieved {len(cii_result)} CII records for this batch")
+            st.success(f"✅ CII batch {batch_num}: Retrieved {len(cii_result)} records")
+            st.write(f"🔍 DEBUG: Sample CII data:", cii_result[:2] if len(cii_result) > 0 else "No data")
         else:
-            st.warning("No CII data returned for this batch")
+            st.warning(f"⚠️ CII batch {batch_num}: No data returned")
+
+    # DEBUG: Show total collected data
+    st.write("🔍 DEBUG: Total data collected:")
+    st.write(f"- Hull: {len(all_hull_data)} records")
+    st.write(f"- ME SFOC: {len(all_me_data)} records") 
+    st.write(f"- Fuel Saving: {len(all_fuel_saving_data)} records")
+    st.write(f"- CII: {len(all_cii_data)} records")
 
     # Process all collected data
     df_hull = pd.DataFrame()
@@ -189,6 +206,7 @@ WHERE
             else:
                 df_hull['Hull Roughness Power Loss %'] = pd.NA
             df_hull = df_hull.rename(columns={'vessel_name': 'Vessel Name'})
+            st.write(f"🔍 DEBUG: Hull DataFrame shape: {df_hull.shape}, columns: {df_hull.columns.tolist()}")
         except Exception as e:
             st.error(f"Error processing hull data: {str(e)}")
             df_hull = pd.DataFrame()
@@ -204,6 +222,7 @@ WHERE
             else:
                 df_me['ME SFOC'] = pd.NA
             df_me = df_me.rename(columns={'vessel_name': 'Vessel Name'})
+            st.write(f"🔍 DEBUG: ME DataFrame shape: {df_me.shape}, columns: {df_me.columns.tolist()}")
         except Exception as e:
             st.error(f"Error processing ME data: {str(e)}")
             df_me = pd.DataFrame()
@@ -223,6 +242,7 @@ WHERE
             else:
                 df_fuel_saving['Potential Fuel Saving'] = pd.NA
             df_fuel_saving = df_fuel_saving.rename(columns={'vessel_name': 'Vessel Name'})
+            st.write(f"🔍 DEBUG: Fuel Saving DataFrame shape: {df_fuel_saving.shape}, columns: {df_fuel_saving.columns.tolist()}")
         except Exception as e:
             st.error(f"Error processing fuel saving data: {str(e)}")
             df_fuel_saving = pd.DataFrame()
@@ -233,35 +253,56 @@ WHERE
     if all_cii_data:
         try:
             df_cii = pd.DataFrame(all_cii_data)
+            st.write(f"🔍 DEBUG: Raw CII DataFrame shape: {df_cii.shape}, columns: {df_cii.columns.tolist()}")
+            st.write(f"🔍 DEBUG: Sample CII DataFrame:")
+            st.write(df_cii.head())
+            
             if 'cii_rating' in df_cii.columns:
                 df_cii = df_cii.rename(columns={'cii_rating': 'YTD CII'})
             else:
+                st.warning("⚠️ 'cii_rating' column not found in CII data")
                 df_cii['YTD CII'] = pd.NA
             df_cii = df_cii.rename(columns={'vessel_name': 'Vessel Name'})
-            st.success(f"Processed {len(df_cii)} CII records successfully")
+            st.write(f"🔍 DEBUG: Processed CII DataFrame shape: {df_cii.shape}, columns: {df_cii.columns.tolist()}")
+            st.success(f"✅ Processed {len(df_cii)} CII records successfully")
         except Exception as e:
             st.error(f"Error processing CII data: {str(e)}")
             df_cii = pd.DataFrame()
     else:
-        st.warning("No CII data available for processing.")
+        st.warning("⚠️ No CII data available for processing.")
 
     # --- Merge DataFrames ---
     df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
+    st.write(f"🔍 DEBUG: Initial df_final shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
 
     if not df_hull.empty:
         df_final = pd.merge(df_final, df_hull, on='Vessel Name', how='left')
+        st.write(f"🔍 DEBUG: After hull merge - shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
     
     if not df_me.empty:
         df_final = pd.merge(df_final, df_me, on='Vessel Name', how='left')
+        st.write(f"🔍 DEBUG: After ME merge - shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
             
     if not df_fuel_saving.empty:
         df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='left')
+        st.write(f"🔍 DEBUG: After fuel saving merge - shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
 
     if not df_cii.empty: # Merge CII data
+        st.write(f"🔍 DEBUG: About to merge CII data...")
+        st.write(f"🔍 DEBUG: df_final vessels: {df_final['Vessel Name'].tolist()[:5]}...")
+        st.write(f"🔍 DEBUG: df_cii vessels: {df_cii['Vessel Name'].tolist()[:5]}...")
+        
         df_final = pd.merge(df_final, df_cii, on='Vessel Name', how='left')
-        st.success(f"Merged CII data - Final dataframe has {len(df_final)} rows")
+        st.write(f"🔍 DEBUG: After CII merge - shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
+        st.success(f"✅ Merged CII data - Final dataframe has {len(df_final)} rows")
+        
+        # Check if YTD CII column has data
+        if 'YTD CII' in df_final.columns:
+            non_null_cii = df_final['YTD CII'].notna().sum()
+            st.write(f"🔍 DEBUG: YTD CII column has {non_null_cii} non-null values out of {len(df_final)} rows")
+        
     else:
-        st.warning("CII dataframe is empty - adding empty YTD CII column")
+        st.warning("⚠️ CII dataframe is empty - adding empty YTD CII column")
         df_final['YTD CII'] = pd.NA
 
     if df_final.empty:
@@ -270,6 +311,7 @@ WHERE
     # --- Post-merge processing for final report ---
     # Add S. No. column
     df_final.insert(0, 'S. No.', range(1, 1 + len(df_final)))
+    st.write(f"🔍 DEBUG: After adding S.No. - columns: {df_final.columns.tolist()}")
     
     # Add Hull Condition column
     def get_hull_condition(value):
@@ -308,6 +350,8 @@ WHERE
     # Add empty Comments column
     df_final['Comments'] = ""
 
+    st.write(f"🔍 DEBUG: After adding all derived columns - columns: {df_final.columns.tolist()}")
+
     # Define the desired order of columns
     desired_columns_order = [
         'S. No.', 
@@ -321,11 +365,23 @@ WHERE
         'ME SFOC'
     ]
     
+    st.write(f"🔍 DEBUG: Desired column order: {desired_columns_order}")
+    
     # Filter df_final to only include columns that exist and are in the desired order
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
+    st.write(f"🔍 DEBUG: Existing and ordered columns: {existing_and_ordered_columns}")
+    
+    # Check if YTD CII is missing and add it if needed
+    if 'YTD CII' not in df_final.columns:
+        st.warning("⚠️ YTD CII column missing - adding empty column")
+        df_final['YTD CII'] = "N/A"
+        existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
+        st.write(f"🔍 DEBUG: After adding missing YTD CII - columns: {existing_and_ordered_columns}")
+    
     df_final = df_final[existing_and_ordered_columns]
+    st.write(f"🔍 DEBUG: Final DataFrame shape: {df_final.shape}, columns: {df_final.columns.tolist()}")
 
-    st.success("Report data retrieved and processed successfully!")
+    st.success("✅ Report data retrieved and processed successfully!")
     return df_final
 
 # --- Styling for Streamlit DataFrame ---
@@ -471,6 +527,10 @@ else:
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
     st.header("3. Report Results")
     
+    # DEBUG: Show final report columns
+    st.write("🔍 DEBUG: Final report columns:", st.session_state.report_data.columns.tolist())
+    st.write("🔍 DEBUG: Final report shape:", st.session_state.report_data.shape)
+    
     styled_df = st.session_state.report_data.style.apply(
         style_condition_columns, axis=1
     )
@@ -523,3 +583,18 @@ with st.expander("📖 How to Use"):
 # Footer
 st.markdown("---")
 st.markdown("*Built with Streamlit 🎈 and Python*")
+'''
+
+# Write the code to a file
+with open('vessel_performance_report_tool_debug.py', 'w') as f:
+    f.write(code_content)
+
+print("Complete Python code with comprehensive debug statements has been written to 'vessel_performance_report_tool_debug.py'")
+print("\nDebug features added:")
+print("1. Shows selected vessels and batch processing details")
+print("2. Displays SQL queries being executed")
+print("3. Shows data collection results for each batch")
+print("4. Tracks DataFrame shapes and columns at each merge step")
+print("5. Shows column ordering and filtering process")
+print("6. Displays final report structure")
+print("7. Checks for YTD CII column presence and data")
