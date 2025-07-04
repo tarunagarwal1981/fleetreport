@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import json
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font, Alignment
@@ -88,16 +88,33 @@ def fetch_all_vessels(lambda_url):
         return []
 
 def query_report_data(lambda_url, vessel_names):
-    """Fetch hull roughness power loss, ME SFOC, Potential Fuel Saving, and YTD CII for selected vessels and process for report."""
+    """Fetch hull roughness power loss, ME SFOC, Potential Fuel Saving, YTD CII, and historical hull conditions for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame()
+
+    # Calculate dates for previous month and previous-to-previous month
+    today = datetime.now()
+    
+    # Last day of previous month
+    first_day_current_month = today.replace(day=1)
+    last_day_previous_month = first_day_current_month - timedelta(days=1)
+    prev_month_str = last_day_previous_month.strftime("%Y-%m-%d")
+    prev_month_col_name = f"Hull Condition {last_day_previous_month.strftime('%b %y')}"
+
+    # Last day of previous-to-previous month
+    first_day_previous_month = last_day_previous_month.replace(day=1)
+    last_day_prev_prev_month = first_day_previous_month - timedelta(days=1)
+    prev_prev_month_str = last_day_prev_prev_month.strftime("%Y-%m-%d")
+    prev_prev_month_col_name = f"Hull Condition {last_day_prev_prev_month.strftime('%b %y')}"
 
     # Process vessels in smaller batches to avoid timeout/size issues
     batch_size = 10
     all_hull_data = []
     all_me_data = []
     all_fuel_saving_data = []
-    all_cii_data = [] # New list for CII data
+    all_cii_data = []
+    all_prev_month_hull_data = [] # New list for previous month hull data
+    all_prev_prev_month_hull_data = [] # New list for previous-to-previous month hull data
     
     total_batches = (len(vessel_names) + batch_size - 1) // batch_size
     
@@ -109,10 +126,10 @@ def query_report_data(lambda_url, vessel_names):
         quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
         vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-        # --- Query 1: Hull Roughness Power Loss ---
+        # --- Query 1: Hull Roughness Power Loss (Current) ---
         sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
         
-        st.info(f"Fetching Hull Roughness data for batch...")
+        st.info(f"Fetching Current Hull Roughness data for batch...")
         
         hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_hull})
         
@@ -155,7 +172,7 @@ GROUP BY
         if fuel_saving_result:
             all_fuel_saving_data.extend(fuel_saving_result)
 
-        # --- Query 4: YTD CII --- (NEW QUERY)
+        # --- Query 4: YTD CII ---
         sql_query_cii = f"""
 SELECT
     vp.vessel_name,
@@ -176,6 +193,39 @@ WHERE
         if cii_result:
             all_cii_data.extend(cii_result)
 
+        # --- Query 5: Hull Roughness Power Loss (Previous Month) ---
+        sql_query_prev_month_hull = f"""
+SELECT
+    vessel_name,
+    hull_rough_power_loss_pct_ed
+FROM
+    hull_performance_six_months_daily
+WHERE
+    vessel_name IN ({vessel_names_list_str})
+    AND updated_ts = '{prev_month_str}'
+"""
+        st.info(f"Fetching Hull Roughness data for {last_day_previous_month.strftime('%b %y')} for batch...")
+        prev_month_hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_prev_month_hull})
+        if prev_month_hull_result:
+            all_prev_month_hull_data.extend(prev_month_hull_result)
+
+        # --- Query 6: Hull Roughness Power Loss (Previous-to-Previous Month) ---
+        sql_query_prev_prev_month_hull = f"""
+SELECT
+    vessel_name,
+    hull_rough_power_loss_pct_ed
+FROM
+    hull_performance_six_months_daily
+WHERE
+    vessel_name IN ({vessel_names_list_str})
+    AND updated_ts = '{prev_prev_month_str}'
+"""
+        st.info(f"Fetching Hull Roughness data for {last_day_prev_prev_month.strftime('%b %y')} for batch...")
+        prev_prev_month_hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_prev_prev_month_hull})
+        if prev_prev_month_hull_result:
+            all_prev_prev_month_hull_data.extend(prev_prev_month_hull_result)
+
+
     # Process all collected data
     df_hull = pd.DataFrame()
     if all_hull_data:
@@ -187,10 +237,10 @@ WHERE
                 df_hull['Hull Roughness Power Loss %'] = pd.NA
             df_hull = df_hull.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
-            st.error(f"Error processing hull data: {str(e)}")
+            st.error(f"Error processing current hull data: {str(e)}")
             df_hull = pd.DataFrame()
     else:
-        st.error("Failed to retrieve hull roughness data.")
+        st.error("Failed to retrieve current hull roughness data.")
 
     df_me = pd.DataFrame()
     if all_me_data:
@@ -226,7 +276,7 @@ WHERE
     else:
         st.error("Failed to retrieve Potential Fuel Saving data.")
 
-    df_cii = pd.DataFrame() # New DataFrame for CII data
+    df_cii = pd.DataFrame()
     if all_cii_data:
         try:
             df_cii = pd.DataFrame(all_cii_data)
@@ -241,6 +291,38 @@ WHERE
     else:
         st.error("Failed to retrieve YTD CII data.")
 
+    # New DataFrames for historical hull data
+    df_prev_month_hull = pd.DataFrame()
+    if all_prev_month_hull_data:
+        try:
+            df_prev_month_hull = pd.DataFrame(all_prev_month_hull_data)
+            if 'hull_rough_power_loss_pct_ed' in df_prev_month_hull.columns:
+                df_prev_month_hull = df_prev_month_hull.rename(columns={'hull_rough_power_loss_pct_ed': f'Hull Roughness Power Loss % {last_day_previous_month.strftime("%b %y")}'})
+            else:
+                df_prev_month_hull[f'Hull Roughness Power Loss % {last_day_previous_month.strftime("%b %y")}'] = pd.NA
+            df_prev_month_hull = df_prev_month_hull.rename(columns={'vessel_name': 'Vessel Name'})
+        except Exception as e:
+            st.error(f"Error processing previous month hull data: {str(e)}")
+            df_prev_month_hull = pd.DataFrame()
+    else:
+        st.warning(f"No hull roughness data found for {last_day_previous_month.strftime('%b %y')}.")
+
+    df_prev_prev_month_hull = pd.DataFrame()
+    if all_prev_prev_month_hull_data:
+        try:
+            df_prev_prev_month_hull = pd.DataFrame(all_prev_prev_month_hull_data)
+            if 'hull_rough_power_loss_pct_ed' in df_prev_prev_month_hull.columns:
+                df_prev_prev_month_hull = df_prev_prev_month_hull.rename(columns={'hull_rough_power_loss_pct_ed': f'Hull Roughness Power Loss % {last_day_prev_prev_month.strftime("%b %y")}'})
+            else:
+                df_prev_prev_month_hull[f'Hull Roughness Power Loss % {last_day_prev_prev_month.strftime("%b %y")}'] = pd.NA
+            df_prev_prev_month_hull = df_prev_prev_month_hull.rename(columns={'vessel_name': 'Vessel Name'})
+        except Exception as e:
+            st.error(f"Error processing previous-to-previous month hull data: {str(e)}")
+            df_prev_prev_month_hull = pd.DataFrame()
+    else:
+        st.warning(f"No hull roughness data found for {last_day_prev_prev_month.strftime('%b %y')}.")
+
+
     # --- Merge DataFrames ---
     df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
 
@@ -253,8 +335,14 @@ WHERE
     if not df_fuel_saving.empty:
         df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='left')
 
-    if not df_cii.empty: # Merge CII data
+    if not df_cii.empty:
         df_final = pd.merge(df_final, df_cii, on='Vessel Name', how='left')
+
+    if not df_prev_month_hull.empty:
+        df_final = pd.merge(df_final, df_prev_month_hull, on='Vessel Name', how='left')
+
+    if not df_prev_prev_month_hull.empty:
+        df_final = pd.merge(df_final, df_prev_prev_month_hull, on='Vessel Name', how='left')
 
     if df_final.empty:
         return pd.DataFrame()
@@ -263,7 +351,7 @@ WHERE
     # Add S. No. column
     df_final.insert(0, 'S. No.', range(1, 1 + len(df_final)))
     
-    # Add Hull Condition column
+    # Hull Condition logic (reusable function)
     def get_hull_condition(value):
         if pd.isna(value):
             return "N/A"
@@ -274,10 +362,22 @@ WHERE
         else:
             return "Poor"
     
+    # Apply Hull Condition to current and historical columns
     if 'Hull Roughness Power Loss %' in df_final.columns:
         df_final['Hull Condition'] = df_final['Hull Roughness Power Loss %'].apply(get_hull_condition)
     else:
         df_final['Hull Condition'] = "N/A"
+
+    if f'Hull Roughness Power Loss % {last_day_previous_month.strftime("%b %y")}' in df_final.columns:
+        df_final[prev_month_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_previous_month.strftime("%b %y")}'].apply(get_hull_condition)
+    else:
+        df_final[prev_month_col_name] = "N/A"
+
+    if f'Hull Roughness Power Loss % {last_day_prev_prev_month.strftime("%b %y")}' in df_final.columns:
+        df_final[prev_prev_month_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_month.strftime("%b %y")}'].apply(get_hull_condition)
+    else:
+        df_final[prev_prev_month_col_name] = "N/A"
+
 
     # Add ME Efficiency column
     def get_me_efficiency(value):
@@ -304,12 +404,16 @@ WHERE
     desired_columns_order = [
         'S. No.', 
         'Vessel Name', 
-        'Hull Condition', 
+        'Hull Condition', # Current Hull Condition
+        prev_month_col_name, # Previous Month Hull Condition
+        prev_prev_month_col_name, # Previous-to-Previous Month Hull Condition
         'ME Efficiency', 
         'Potential Fuel Saving',
-        'YTD CII', # Added YTD CII
+        'YTD CII',
         'Comments',
-        'Hull Roughness Power Loss %',
+        'Hull Roughness Power Loss %', # Raw data for current
+        f'Hull Roughness Power Loss % {last_day_previous_month.strftime("%b %y")}', # Raw data for previous month
+        f'Hull Roughness Power Loss % {last_day_prev_prev_month.strftime("%b %y")}', # Raw data for previous-to-previous month
         'ME SFOC'
     ]
     
@@ -324,15 +428,18 @@ WHERE
 def style_condition_columns(row):
     styles = [''] * len(row)
     
-    # Hull Condition styling
-    if 'Hull Condition' in row.index:
-        hull_val = row['Hull Condition']
-        if hull_val == "Good":
-            styles[row.index.get_loc('Hull Condition')] = 'background-color: #d4edda; color: black;'
-        elif hull_val == "Average":
-            styles[row.index.get_loc('Hull Condition')] = 'background-color: #fff3cd; color: black;'
-        elif hull_val == "Poor":
-            styles[row.index.get_loc('Hull Condition')] = 'background-color: #f8d7da; color: black;'
+    # List of all hull condition columns to style
+    hull_condition_cols = [col for col in row.index if 'Hull Condition' in col]
+
+    for col_name in hull_condition_cols:
+        if col_name in row.index:
+            hull_val = row[col_name]
+            if hull_val == "Good":
+                styles[row.index.get_loc(col_name)] = 'background-color: #d4edda; color: black;'
+            elif hull_val == "Average":
+                styles[row.index.get_loc(col_name)] = 'background-color: #fff3cd; color: black;'
+            elif hull_val == "Poor":
+                styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
     
     # ME Efficiency styling
     if 'ME Efficiency' in row.index:
@@ -371,7 +478,7 @@ def create_excel_download_with_styling(df, filename):
             cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value)
             
             # Apply styling for 'Hull Condition' and 'ME Efficiency' columns
-            if col_name in ['Hull Condition', 'ME Efficiency']:
+            if 'Hull Condition' in col_name or col_name == 'ME Efficiency': # Check if it's any hull condition column or ME Efficiency
                 if cell_value == "Good":
                     cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
                 elif cell_value == "Average":
@@ -502,7 +609,7 @@ with st.expander("📖 How to Use"):
     
     ### Report Columns:
     
-    - **Hull Condition**: Based on Hull Roughness Power Loss %
+    - **Hull Condition (Current, Previous Month, Previous-to-Previous Month)**: Based on Hull Roughness Power Loss %
       - Good: < 15%
       - Average: 15-25%
       - Poor: > 25%
