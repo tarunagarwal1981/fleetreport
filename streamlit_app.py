@@ -88,7 +88,7 @@ def fetch_all_vessels(lambda_url):
         return []
 
 def query_report_data(lambda_url, vessel_names):
-    """Fetch hull roughness power loss, ME SFOC, and Potential Fuel Saving for selected vessels and process for report."""
+    """Fetch hull roughness power loss, ME SFOC, Potential Fuel Saving, and YTD CII for selected vessels and process for report."""
     if not vessel_names:
         return pd.DataFrame()
 
@@ -97,6 +97,7 @@ def query_report_data(lambda_url, vessel_names):
     all_hull_data = []
     all_me_data = []
     all_fuel_saving_data = []
+    all_cii_data = [] # New list for CII data
     
     total_batches = (len(vessel_names) + batch_size - 1) // batch_size
     
@@ -108,7 +109,7 @@ def query_report_data(lambda_url, vessel_names):
         quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
         vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-        # --- Query 1: Hull Roughness Power Loss --- (REMOVED SEMICOLON)
+        # --- Query 1: Hull Roughness Power Loss ---
         sql_query_hull = f"SELECT vessel_name, hull_rough_power_loss_pct_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
         
         st.info(f"Fetching Hull Roughness data for batch...")
@@ -118,7 +119,7 @@ def query_report_data(lambda_url, vessel_names):
         if hull_result:
             all_hull_data.extend(hull_result)
         
-        # --- Query 2: ME SFOC --- (FIXED QUERY, REMOVED SEMICOLON)
+        # --- Query 2: ME SFOC ---
         sql_query_me = f"""
 SELECT
     vp.vessel_name,
@@ -144,7 +145,7 @@ GROUP BY
         if me_result:
             all_me_data.extend(me_result)
         
-        # --- Query 3: Potential Fuel Saving --- (REMOVED SEMICOLON)
+        # --- Query 3: Potential Fuel Saving ---
         sql_query_fuel_saving = f"SELECT vessel_name, hull_rough_excess_consumption_mt_ed FROM hull_performance_six_months WHERE vessel_name IN ({vessel_names_list_str})"
         
         st.info(f"Fetching Potential Fuel Saving data for batch...")
@@ -153,6 +154,27 @@ GROUP BY
 
         if fuel_saving_result:
             all_fuel_saving_data.extend(fuel_saving_result)
+
+        # --- Query 4: YTD CII --- (NEW QUERY)
+        sql_query_cii = f"""
+SELECT
+    vp.vessel_name,
+    cy.cii_rating
+FROM
+    vessel_particulars vp
+JOIN
+    cii_ytd cy
+ON
+    CAST(vp.vessel_imo AS TEXT) = CAST(cy.vessel_imo AS TEXT)
+WHERE
+    vp.vessel_name IN ({vessel_names_list_str})
+"""
+        st.info(f"Fetching YTD CII data for batch...")
+        
+        cii_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_cii})
+
+        if cii_result:
+            all_cii_data.extend(cii_result)
 
     # Process all collected data
     df_hull = pd.DataFrame()
@@ -204,6 +226,21 @@ GROUP BY
     else:
         st.error("Failed to retrieve Potential Fuel Saving data.")
 
+    df_cii = pd.DataFrame() # New DataFrame for CII data
+    if all_cii_data:
+        try:
+            df_cii = pd.DataFrame(all_cii_data)
+            if 'cii_rating' in df_cii.columns:
+                df_cii = df_cii.rename(columns={'cii_rating': 'YTD CII'})
+            else:
+                df_cii['YTD CII'] = pd.NA
+            df_cii = df_cii.rename(columns={'vessel_name': 'Vessel Name'})
+        except Exception as e:
+            st.error(f"Error processing CII data: {str(e)}")
+            df_cii = pd.DataFrame()
+    else:
+        st.error("Failed to retrieve YTD CII data.")
+
     # --- Merge DataFrames ---
     df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
 
@@ -215,6 +252,9 @@ GROUP BY
             
     if not df_fuel_saving.empty:
         df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='left')
+
+    if not df_cii.empty: # Merge CII data
+        df_final = pd.merge(df_final, df_cii, on='Vessel Name', how='left')
 
     if df_final.empty:
         return pd.DataFrame()
@@ -267,6 +307,7 @@ GROUP BY
         'Hull Condition', 
         'ME Efficiency', 
         'Potential Fuel Saving',
+        'YTD CII', # Added YTD CII
         'Comments',
         'Hull Roughness Power Loss %',
         'ME SFOC'
@@ -467,6 +508,8 @@ with st.expander("📖 How to Use"):
     - **Potential Fuel Saving**: Excess fuel consumption in metric tons per day
       - Capped at 4.9 if > 5
       - Set to 0 if < 0
+    
+    - **YTD CII**: The Carbon Intensity Indicator rating for the vessel.
     """)
 
 # Footer
