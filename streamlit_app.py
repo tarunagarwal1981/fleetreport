@@ -155,7 +155,7 @@ GROUP BY
         if fuel_saving_result:
             all_fuel_saving_data.extend(fuel_saving_result)
 
-        # --- Query 4: YTD CII --- (NEW QUERY)
+        # --- Query 4: YTD CII --- (FIXED QUERY WITH TRIM)
         sql_query_cii = f"""
 SELECT
     vp.vessel_name,
@@ -165,7 +165,7 @@ FROM
 JOIN
     cii_ytd cy
 ON
-    CAST(vp.vessel_imo AS TEXT) = CAST(cy.vessel_imo AS TEXT)
+    TRIM(vp.vessel_imo) = TRIM(cy.vessel_imo)
 WHERE
     vp.vessel_name IN ({vessel_names_list_str})
 """
@@ -175,6 +175,9 @@ WHERE
 
         if cii_result:
             all_cii_data.extend(cii_result)
+            st.success(f"Retrieved {len(cii_result)} CII records for this batch")
+        else:
+            st.warning("No CII data returned for this batch")
 
     # Process all collected data
     df_hull = pd.DataFrame()
@@ -235,11 +238,12 @@ WHERE
             else:
                 df_cii['YTD CII'] = pd.NA
             df_cii = df_cii.rename(columns={'vessel_name': 'Vessel Name'})
+            st.success(f"Processed {len(df_cii)} CII records successfully")
         except Exception as e:
             st.error(f"Error processing CII data: {str(e)}")
             df_cii = pd.DataFrame()
     else:
-        st.error("Failed to retrieve YTD CII data.")
+        st.warning("No CII data available for processing.")
 
     # --- Merge DataFrames ---
     df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
@@ -255,10 +259,10 @@ WHERE
 
     if not df_cii.empty: # Merge CII data
         df_final = pd.merge(df_final, df_cii, on='Vessel Name', how='left')
+        st.success(f"Merged CII data - Final dataframe has {len(df_final)} rows")
     else:
-        # If no CII data is retrieved, ensure the column exists with NA values
+        st.warning("CII dataframe is empty - adding empty YTD CII column")
         df_final['YTD CII'] = pd.NA
-
 
     if df_final.empty:
         return pd.DataFrame()
@@ -350,11 +354,6 @@ def style_condition_columns(row):
         elif me_val == "Anomalous data":
             styles[row.index.get_loc('ME Efficiency')] = 'background-color: #e0e0e0; color: black;'
             
-    # YTD CII styling (no specific color, but ensure it's handled)
-    if 'YTD CII' in row.index:
-        # No specific styling needed for CII, but including it here ensures it's processed
-        pass 
-            
     return styles
 
 # --- Excel Export Function ---
@@ -385,9 +384,6 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Anomalous data":
                     cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
                 cell.font = Font(color="000000")
-            # No specific styling for 'YTD CII' but ensure it's written
-            elif col_name == 'YTD CII':
-                cell.alignment = Alignment(horizontal='center') # Example: center align CII values
 
     # Set column widths
     for col_idx, column in enumerate(df.columns, 1):
@@ -475,10 +471,6 @@ else:
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
     st.header("3. Report Results")
     
-    # Explicitly check if 'YTD CII' column exists before styling
-    if 'YTD CII' not in st.session_state.report_data.columns:
-        st.session_state.report_data['YTD CII'] = pd.NA # Add it if missing, with NA values
-
     styled_df = st.session_state.report_data.style.apply(
         style_condition_columns, axis=1
     )
