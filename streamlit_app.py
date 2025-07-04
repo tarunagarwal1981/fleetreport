@@ -194,6 +194,7 @@ WHERE
             all_cii_data.extend(cii_result)
 
         # --- Query 5: Hull Roughness Power Loss (Previous Month) ---
+        # IMPORTANT: Cast updated_ts to DATE for comparison
         sql_query_prev_month_hull = f"""
 SELECT
     vessel_name,
@@ -202,7 +203,7 @@ FROM
     hull_performance_six_months_daily
 WHERE
     vessel_name IN ({vessel_names_list_str})
-    AND updated_ts = '{prev_month_str}'
+    AND CAST(updated_ts AS DATE) = '{prev_month_str}'
 """
         st.info(f"Fetching Hull Roughness data for {last_day_previous_month.strftime('%b %y')} for batch...")
         prev_month_hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_prev_month_hull})
@@ -210,6 +211,7 @@ WHERE
             all_prev_month_hull_data.extend(prev_month_hull_result)
 
         # --- Query 6: Hull Roughness Power Loss (Previous-to-Previous Month) ---
+        # IMPORTANT: Cast updated_ts to DATE for comparison
         sql_query_prev_prev_month_hull = f"""
 SELECT
     vessel_name,
@@ -218,7 +220,7 @@ FROM
     hull_performance_six_months_daily
 WHERE
     vessel_name IN ({vessel_names_list_str})
-    AND updated_ts = '{prev_prev_month_str}'
+    AND CAST(updated_ts AS DATE) = '{prev_prev_month_str}'
 """
         st.info(f"Fetching Hull Roughness data for {last_day_prev_prev_month.strftime('%b %y')} for batch...")
         prev_prev_month_hull_result = invoke_lambda_function_url(lambda_url, {"sql_query": sql_query_prev_prev_month_hull})
