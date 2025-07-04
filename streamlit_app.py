@@ -255,6 +255,10 @@ WHERE
 
     if not df_cii.empty: # Merge CII data
         df_final = pd.merge(df_final, df_cii, on='Vessel Name', how='left')
+    else:
+        # If no CII data is retrieved, ensure the column exists with NA values
+        df_final['YTD CII'] = pd.NA
+
 
     if df_final.empty:
         return pd.DataFrame()
@@ -471,6 +475,10 @@ else:
 if st.session_state.report_data is not None and not st.session_state.report_data.empty:
     st.header("3. Report Results")
     
+    # Explicitly check if 'YTD CII' column exists before styling
+    if 'YTD CII' not in st.session_state.report_data.columns:
+        st.session_state.report_data['YTD CII'] = pd.NA # Add it if missing, with NA values
+
     styled_df = st.session_state.report_data.style.apply(
         style_condition_columns, axis=1
     )
