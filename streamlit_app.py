@@ -346,6 +346,11 @@ def style_condition_columns(row):
         elif me_val == "Anomalous data":
             styles[row.index.get_loc('ME Efficiency')] = 'background-color: #e0e0e0; color: black;'
             
+    # YTD CII styling (no specific color, but ensure it's handled)
+    if 'YTD CII' in row.index:
+        # No specific styling needed for CII, but including it here ensures it's processed
+        pass 
+            
     return styles
 
 # --- Excel Export Function ---
@@ -376,6 +381,9 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Anomalous data":
                     cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
                 cell.font = Font(color="000000")
+            # No specific styling for 'YTD CII' but ensure it's written
+            elif col_name == 'YTD CII':
+                cell.alignment = Alignment(horizontal='center') # Example: center align CII values
 
     # Set column widths
     for col_idx, column in enumerate(df.columns, 1):
