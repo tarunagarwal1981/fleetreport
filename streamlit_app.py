@@ -609,6 +609,21 @@ def set_cell_border(cell, **kwargs):
                 border_element.set(qn(f"w:{attr}"), str(value))
             tcPr.append(border_element)
 
+# Helper function to set cell shading (background color)
+def set_cell_shading(cell, color_hex):
+    """
+    Set background color for a table cell using direct XML manipulation.
+    color_hex should be an RGB hex string (e.g., "FF0000" for red).
+    """
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear") # "clear" means solid fill
+    shd.set(qn("w:color"), "auto") # "auto" means default text color
+    shd.set(qn("w:fill"), color_hex) # The fill color
+    tcPr.append(shd)
+
 def create_advanced_word_report(df, template_path="Fleet Performance Template.docx"):
     """Create an advanced Word report with better formatting and multiple sections."""
     try:
@@ -682,7 +697,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
                 # Set table borders (grid lines)
-                # This applies a default border to the entire table, then we'll apply to cells
                 table.autofit = False # Important for setting widths
                 table.allow_autofit = False
                 
@@ -696,8 +710,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         run.font.color.rgb = RGBColor(255, 255, 255)  # White text
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
-                    # Set header background to dark blue
-                    cell.shading.background_pattern_color = "2F75B5" # Dark blue
+                    # Set header background to dark blue using the new helper
+                    set_cell_shading(cell, "2F75B5") # Dark blue
                     
                     # Apply borders to header cells
                     set_cell_border(
@@ -722,7 +736,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                             color_hex = get_cell_color(cell_value)
                             if color_hex:
-                                cell.shading.background_pattern_color = color_hex
+                                set_cell_shading(cell, color_hex)
                         
                         # Apply borders to data cells
                         set_cell_border(
@@ -759,7 +773,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     if status in ["Good", "Average", "Poor", "Anomalous data"]:
                         color_hex = get_cell_color(status)
                         if color_hex:
-                            cell_status.shading.background_pattern_color = color_hex
+                            set_cell_shading(cell_status, color_hex)
                     
                     # Apply borders to legend cells
                     set_cell_border(
@@ -852,8 +866,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     run.font.color.rgb = RGBColor(255, 255, 255)  # White text
                 cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
-                # Set header background to dark blue
-                cell.shading.background_pattern_color = "2F75B5" # Dark blue
+                # Set header background to dark blue using the new helper
+                set_cell_shading(cell, "2F75B5") # Dark blue
                 
                 # Apply borders to header cells
                 set_cell_border(
@@ -878,7 +892,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                         color_hex = get_cell_color(cell_value)
                         if color_hex:
-                            cell.shading.background_pattern_color = color_hex
+                            set_cell_shading(cell, color_hex)
                     
                     # Apply borders to data cells
                     set_cell_border(
@@ -915,7 +929,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 if status in ["Good", "Average", "Poor", "Anomalous data"]:
                     color_hex = get_cell_color(status)
                     if color_hex:
-                        cell_status.shading.background_pattern_color = color_hex
+                        set_cell_shading(cell_status, color_hex)
                 
                 # Apply borders to legend cells
                 set_cell_border(
