@@ -10,10 +10,12 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.styles.colors import Color
 import time
 from docx import Document
-from docx.shared import Inches
+from docx.shared import Inches, Pt
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import RGBColor
+from docx.oxml.ns import qn # For XML manipulation
+from docx.oxml import OxmlElement # For XML manipulation
 import os
 
 # Page configuration
@@ -590,6 +592,23 @@ def get_cell_color(cell_value):
     }
     return color_map.get(cell_value, None)
 
+# Helper function to set cell borders
+def set_cell_border(cell, **kwargs):
+    """
+    Set borders for a table cell.
+    Usage: set_cell_border(cell, top={"sz": 12, "val": "single", "color": "#000000"})
+    """
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+
+    # Create a border element for each side
+    for border_name in ("top", "left", "bottom", "right"):
+        if border_name in kwargs:
+            border_element = OxmlElement(f"w:{border_name}")
+            for attr, value in kwargs[border_name].items():
+                border_element.set(qn(f"w:{attr}"), str(value))
+            tcPr.append(border_element)
+
 def create_advanced_word_report(df, template_path="Fleet Performance Template.docx"):
     """Create an advanced Word report with better formatting and multiple sections."""
     try:
@@ -611,7 +630,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 # Add report title
                 title_paragraph = doc.add_paragraph()
                 title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
-                title_run.font.size = Inches(0.2)
+                title_run.font.size = Pt(24) # Larger font for title
                 title_run.font.bold = True
                 title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
@@ -660,55 +679,66 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 
                 # Create the main data table
                 table = doc.add_table(rows=1, cols=len(df.columns))
-                # Removed: table.style = 'Table Grid' # This line caused the KeyError
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                
+                # Set table borders (grid lines)
+                # This applies a default border to the entire table, then we'll apply to cells
+                table.autofit = False # Important for setting widths
+                table.allow_autofit = False
                 
                 # Style header row
                 header_cells = table.rows[0].cells
                 for i, column_name in enumerate(df.columns):
-                    header_cells[i].text = str(column_name)
-                    for run in header_cells[i].paragraphs[0].runs:
+                    cell = header_cells[i]
+                    cell.text = str(column_name)
+                    for run in cell.paragraphs[0].runs:
                         run.font.bold = True
-                        try:
-                            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
-                        except Exception as e:
-                            st.warning(f"Could not set font color for header: {e}")
-                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
                     # Set header background to dark blue
-                    try:
-                        cell_shading = header_cells[i]._tc.get_or_add_tcPr()
-                        cell_fill = cell_shading.get_or_add_shd()
-                        cell_fill.fill = "2F75B5"  # Dark blue
-                    except Exception as e:
-                        st.warning(f"Could not set header background color: {e}")
+                    cell.shading.background_pattern_color = "2F75B5" # Dark blue
+                    
+                    # Apply borders to header cells
+                    set_cell_border(
+                        cell,
+                        top={"sz": 6, "val": "single", "color": "000000"},
+                        left={"sz": 6, "val": "single", "color": "000000"},
+                        bottom={"sz": 6, "val": "single", "color": "000000"},
+                        right={"sz": 6, "val": "single", "color": "000000"},
+                    )
                 
                 # Add data rows with formatting
                 for _, row in df.iterrows():
                     row_cells = table.add_row().cells
                     for i, value in enumerate(row):
+                        cell = row_cells[i]
                         cell_value = str(value) if pd.notna(value) else "N/A"
-                        row_cells[i].text = cell_value
-                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        cell.text = cell_value
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         
                         # Apply conditional formatting
                         column_name = df.columns[i]
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                            color = get_cell_color(cell_value)
-                            if color:
-                                try:
-                                    cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                    cell_fill = cell_shading.get_or_add_shd()
-                                    cell_fill.fill = color
-                                except Exception as e:
-                                    st.warning(f"Could not set cell background color for data: {e}")
+                            color_hex = get_cell_color(cell_value)
+                            if color_hex:
+                                cell.shading.background_pattern_color = color_hex
+                        
+                        # Apply borders to data cells
+                        set_cell_border(
+                            cell,
+                            top={"sz": 6, "val": "single", "color": "000000"},
+                            left={"sz": 6, "val": "single", "color": "000000"},
+                            bottom={"sz": 6, "val": "single", "color": "000000"},
+                            right={"sz": 6, "val": "single", "color": "000000"},
+                        )
                 
                 # Add legend
                 doc.add_paragraph()
                 doc.add_paragraph("Legend", style='Heading 3')
                 
                 legend_table = doc.add_table(rows=5, cols=2)
-                # Removed: legend_table.style = 'Table Grid' # This line caused the KeyError
+                legend_table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
                 legend_data = [
                     ("Good", "Performance within optimal range"),
@@ -719,19 +749,33 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 ]
                 
                 for i, (status, description) in enumerate(legend_data):
-                    legend_table.cell(i, 0).text = status
-                    legend_table.cell(i, 1).text = description
+                    cell_status = legend_table.cell(i, 0)
+                    cell_description = legend_table.cell(i, 1)
+                    
+                    cell_status.text = status
+                    cell_description.text = description
                     
                     # Apply color coding to legend
                     if status in ["Good", "Average", "Poor", "Anomalous data"]:
-                        color = get_cell_color(status)
-                        if color:
-                            try:
-                                cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
-                            except Exception as e:
-                                st.warning(f"Could not set cell background color for legend: {e}")
+                        color_hex = get_cell_color(status)
+                        if color_hex:
+                            cell_status.shading.background_pattern_color = color_hex
+                    
+                    # Apply borders to legend cells
+                    set_cell_border(
+                        cell_status,
+                        top={"sz": 6, "val": "single", "color": "000000"},
+                        left={"sz": 6, "val": "single", "color": "000000"},
+                        bottom={"sz": 6, "val": "single", "color": "000000"},
+                        right={"sz": 6, "val": "single", "color": "000000"},
+                    )
+                    set_cell_border(
+                        cell_description,
+                        top={"sz": 6, "val": "single", "color": "000000"},
+                        left={"sz": 6, "val": "single", "color": "000000"},
+                        bottom={"sz": 6, "val": "single", "color": "000000"},
+                        right={"sz": 6, "val": "single", "color": "000000"},
+                    )
                 
                 break # Exit loop after finding and processing the placeholder
         
@@ -743,7 +787,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             # Add report title
             title_paragraph = doc.add_paragraph()
             title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
-            title_run.font.size = Inches(0.2)
+            title_run.font.size = Pt(24) # Larger font for title
             title_run.font.bold = True
             title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
@@ -792,55 +836,65 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             
             # Create the main data table
             table = doc.add_table(rows=1, cols=len(df.columns))
-            # Removed: table.style = 'Table Grid' # This line caused the KeyError
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Set table borders (grid lines)
+            table.autofit = False
+            table.allow_autofit = False
             
             # Style header row
             header_cells = table.rows[0].cells
             for i, column_name in enumerate(df.columns):
-                header_cells[i].text = str(column_name)
-                for run in header_cells[i].paragraphs[0].runs:
+                cell = header_cells[i]
+                cell.text = str(column_name)
+                for run in cell.paragraphs[0].runs:
                     run.font.bold = True
-                    try:
-                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
-                    except Exception as e:
-                        st.warning(f"Could not set font color for header: {e}")
-                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
                 # Set header background to dark blue
-                try:
-                    cell_shading = header_cells[i]._tc.get_or_add_tcPr()
-                    cell_fill = cell_shading.get_or_add_shd()
-                    cell_fill.fill = "2F75B5"  # Dark blue
-                except Exception as e:
-                    st.warning(f"Could not set header background color: {e}")
+                cell.shading.background_pattern_color = "2F75B5" # Dark blue
+                
+                # Apply borders to header cells
+                set_cell_border(
+                    cell,
+                    top={"sz": 6, "val": "single", "color": "000000"},
+                    left={"sz": 6, "val": "single", "color": "000000"},
+                    bottom={"sz": 6, "val": "single", "color": "000000"},
+                    right={"sz": 6, "val": "single", "color": "000000"},
+                )
             
             # Add data rows with formatting
             for _, row in df.iterrows():
                 row_cells = table.add_row().cells
                 for i, value in enumerate(row):
+                    cell = row_cells[i]
                     cell_value = str(value) if pd.notna(value) else "N/A"
-                    row_cells[i].text = cell_value
-                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    cell.text = cell_value
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
                     # Apply conditional formatting
                     column_name = df.columns[i]
                     if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                        color = get_cell_color(cell_value)
-                        if color:
-                            try:
-                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
-                            except Exception as e:
-                                st.warning(f"Could not set cell background color for data: {e}")
+                        color_hex = get_cell_color(cell_value)
+                        if color_hex:
+                            cell.shading.background_pattern_color = color_hex
+                    
+                    # Apply borders to data cells
+                    set_cell_border(
+                        cell,
+                        top={"sz": 6, "val": "single", "color": "000000"},
+                        left={"sz": 6, "val": "single", "color": "000000"},
+                        bottom={"sz": 6, "val": "single", "color": "000000"},
+                        right={"sz": 6, "val": "single", "color": "000000"},
+                    )
             
             # Add legend
             doc.add_paragraph()
             doc.add_paragraph("Legend", style='Heading 3')
             
             legend_table = doc.add_table(rows=5, cols=2)
-            # Removed: legend_table.style = 'Table Grid' # This line caused the KeyError
+            legend_table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             legend_data = [
                 ("Good", "Performance within optimal range"),
@@ -851,19 +905,33 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             ]
             
             for i, (status, description) in enumerate(legend_data):
-                legend_table.cell(i, 0).text = status
-                legend_table.cell(i, 1).text = description
+                cell_status = legend_table.cell(i, 0)
+                cell_description = legend_table.cell(i, 1)
+                
+                cell_status.text = status
+                cell_description.text = description
                 
                 # Apply color coding to legend
                 if status in ["Good", "Average", "Poor", "Anomalous data"]:
-                    color = get_cell_color(status)
-                    if color:
-                        try:
-                            cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
-                            cell_fill = cell_shading.get_or_add_shd()
-                            cell_fill.fill = color
-                        except Exception as e:
-                            st.warning(f"Could not set cell background color for legend: {e}")
+                    color_hex = get_cell_color(status)
+                    if color_hex:
+                        cell_status.shading.background_pattern_color = color_hex
+                
+                # Apply borders to legend cells
+                set_cell_border(
+                    cell_status,
+                    top={"sz": 6, "val": "single", "color": "000000"},
+                    left={"sz": 6, "val": "single", "color": "000000"},
+                    bottom={"sz": 6, "val": "single", "color": "000000"},
+                    right={"sz": 6, "val": "single", "color": "000000"},
+                )
+                set_cell_border(
+                    cell_description,
+                    top={"sz": 6, "val": "single", "color": "000000"},
+                    left={"sz": 6, "val": "single", "color": "000000"},
+                    bottom={"sz": 6, "val": "single", "color": "000000"},
+                    right={"sz": 6, "val": "single", "color": "000000"},
+                )
         
         # Save to bytes buffer
         output = io.BytesIO()
