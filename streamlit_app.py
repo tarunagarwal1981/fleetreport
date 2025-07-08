@@ -1391,7 +1391,7 @@ def main():
     with col3:
         stats = st.session_state.performance_stats
         if stats['total_requests'] > 0:
-            st.markdown(f"*{stats['total_requests']} requests • {stats['avg_response_time']:.2f}s avg*}")
+            st.markdown(f"*{stats['total_requests']} requests • {stats['avg_response_time']:.2f}s avg*}}")
 
 if __name__ == "__main__":
     main()
