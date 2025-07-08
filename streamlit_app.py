@@ -1491,8 +1491,11 @@ def main():
                     with col1:
                         # Latest month hull condition
                         latest_hull_data = st.session_state.report_data[hull_cols[0]].value_counts()
-                        st.bar_chart(latest_hull_data, use_container_width=True)
-                        st.caption(f"Distribution for {hull_cols[0]}")
+                        if len(latest_hull_data) > 0 and latest_hull_data.sum() > 0:
+                            st.bar_chart(latest_hull_data, use_container_width=True)
+                            st.caption(f"Distribution for {hull_cols[0]}")
+                        else:
+                            st.info("No hull condition data available for chart")
                     
                     with col2:
                         # Hull condition summary table
@@ -1512,6 +1515,42 @@ def main():
                         st.dataframe(hull_summary_df, use_container_width=True)
                 else:
                     st.info("No hull condition data available for analysis")
+            
+            with tab2:
+                st.subheader("⚙️ ME Efficiency Distribution")
+                me_cols = [col for col in st.session_state.report_data.columns if 'ME Efficiency' in col]
+                
+                if me_cols:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Latest month ME efficiency
+                        latest_me_data = st.session_state.report_data[me_cols[0]].value_counts()
+                        if len(latest_me_data) > 0 and latest_me_data.sum() > 0:
+                            st.bar_chart(latest_me_data, use_container_width=True)
+                            st.caption(f"Distribution for {me_cols[0]}")
+                        else:
+                            st.info("No ME efficiency data available for chart")
+                    
+                    with col2:
+                        # ME efficiency summary table
+                        me_summary = []
+                        for col in me_cols:
+                            month = col.replace("ME Efficiency ", "")
+                            counts = st.session_state.report_data[col].value_counts()
+                            me_summary.append({
+                                "Month": month,
+                                "Good": counts.get("Good", 0),
+                                "Average": counts.get("Average", 0),
+                                "Poor": counts.get("Poor", 0),
+                                "Anomalous": counts.get("Anomalous data", 0),
+                                "N/A": counts.get("N/A", 0)
+                            })
+                        
+                        me_summary_df = pd.DataFrame(me_summary)
+                        st.dataframe(me_summary_df, use_container_width=True)
+                else:
+                    st.info("No ME efficiency data available for analysis")"No hull condition data available for analysis")
             
             with tab2:
                 st.subheader("⚙️ ME Efficiency Distribution")
@@ -1608,28 +1647,6 @@ def main():
                             st.info("No ME efficiency data available for trend analysis")
                     else:
                         st.info("No ME efficiency data available for trend analysis")
-                else:
-                    st.info("Need at least 2 months of ME efficiency data for trend analysis")report_data[st.session_state.report_data[col] == "Good"])
-                        percentage = (good_count / total_with_data * 100) if total_with_data > 0 else 0
-                        hull_trend_data.append({"Month": month, "Good %": percentage})
-                    
-                    hull_trend_df = pd.DataFrame(hull_trend_data)
-                    st.line_chart(hull_trend_df.set_index("Month"), use_container_width=True)
-                else:
-                    st.info("Need at least 2 months of hull data for trend analysis")
-                
-                if len(me_cols) >= 2:
-                    st.write("**ME Efficiency Trends (% Good)**")
-                    me_trend_data = []
-                    for col in me_cols:
-                        month = col.replace("ME Efficiency ", "")
-                        total_with_data = len(st.session_state.report_data[st.session_state.report_data[col] != "N/A"])
-                        good_count = len(st.session_state.report_data[st.session_state.report_data[col] == "Good"])
-                        percentage = (good_count / total_with_data * 100) if total_with_data > 0 else 0
-                        me_trend_data.append({"Month": month, "Good %": percentage})
-                    
-                    me_trend_df = pd.DataFrame(me_trend_data)
-                    st.line_chart(me_trend_df.set_index("Month"), use_container_width=True)
                 else:
                     st.info("Need at least 2 months of ME efficiency data for trend analysis")
 
