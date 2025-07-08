@@ -660,7 +660,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 
                 # Create the main data table
                 table = doc.add_table(rows=1, cols=len(df.columns))
-                table.style = 'Table Grid'
+                # Removed: table.style = 'Table Grid' # This line caused the KeyError
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
                 # Style header row
@@ -708,7 +708,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 doc.add_paragraph("Legend", style='Heading 3')
                 
                 legend_table = doc.add_table(rows=5, cols=2)
-                legend_table.style = 'Table Grid'
+                # Removed: legend_table.style = 'Table Grid' # This line caused the KeyError
                 
                 legend_data = [
                     ("Good", "Performance within optimal range"),
@@ -792,7 +792,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             
             # Create the main data table
             table = doc.add_table(rows=1, cols=len(df.columns))
-            table.style = 'Table Grid'
+            # Removed: table.style = 'Table Grid' # This line caused the KeyError
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
             # Style header row
@@ -840,7 +840,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             doc.add_paragraph("Legend", style='Heading 3')
             
             legend_table = doc.add_table(rows=5, cols=2)
-            legend_table.style = 'Table Grid'
+            # Removed: legend_table.style = 'Table Grid' # This line caused the KeyError
             
             legend_data = [
                 ("Good", "Performance within optimal range"),
