@@ -1604,7 +1604,6 @@ def main():
                                 "Average": counts.get("Average", 0),
                                 "Poor": counts.get("Poor", 0),
                                 "Anomalous": counts.get("Anomalous data", 0),
-                                "N/A": counts.get("N/A", 0)
                             })
                         
                         me_summary_df = pd.DataFrame(me_summary)
