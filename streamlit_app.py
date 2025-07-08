@@ -698,6 +698,54 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                             right={"sz": 6, "val": "single", "color": "000000"},
                         )
 
+                # --- Add Appendix Section ---
+                doc.add_page_break()
+
+                # Appendix Title with blue background
+                appendix_title_paragraph = doc.add_paragraph()
+                appendix_title_run = appendix_title_paragraph.add_run("Appendix")
+                appendix_title_run.font.size = Pt(20)
+                appendix_title_run.font.bold = True
+                appendix_title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                # Set background color for the Appendix title paragraph
+                appendix_title_paragraph_format = appendix_title_paragraph.paragraph_format
+                shading_elm = OxmlElement('w:shd')
+                shading_elm.set(qn('w:val'), 'clear')
+                shading_elm.set(qn('w:color'), 'auto')
+                shading_elm.set(qn('w:fill'), '00B0F0') # Blue color
+                appendix_title_paragraph_format._element.get_or_add_pPr().append(shading_elm)
+
+
+                # General Conditions
+                doc.add_paragraph() # Add a small space
+                doc.add_paragraph("General Conditions", style='Heading 3')
+                doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later", style='List Bullet')
+                doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.", style='List Bullet')
+                doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.", style='List Bullet')
+                doc.add_paragraph("Data is compared with Original Sea Trial", style='List Bullet')
+
+                # Hull Performance
+                doc.add_paragraph() # Add a small space
+                doc.add_paragraph("Hull Performance", style='Heading 3')
+
+                # Helper to add bullet points with specific colors
+                def add_colored_bullet(doc, text, color_rgb):
+                    p = doc.add_paragraph(style='List Bullet')
+                    run = p.add_run(text)
+                    run.font.color.rgb = color_rgb
+
+                add_colored_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
+                add_colored_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
+                add_colored_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
+
+                # Machinery Performance
+                doc.add_paragraph() # Add a small space
+                doc.add_paragraph("Machinery Performance", style='Heading 3')
+                add_colored_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
+                add_colored_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
+                add_colored_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
+
                 break # Exit loop after finding and processing the placeholder
 
         if not placeholder_found:
@@ -776,6 +824,54 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         bottom={"sz": 6, "val": "single", "color": "000000"},
                         right={"sz": 6, "val": "single", "color": "000000"},
                     )
+
+            # --- Add Appendix Section (if placeholder not found) ---
+            doc.add_page_break()
+
+            # Appendix Title with blue background
+            appendix_title_paragraph = doc.add_paragraph()
+            appendix_title_run = appendix_title_paragraph.add_run("Appendix")
+            appendix_title_run.font.size = Pt(20)
+            appendix_title_run.font.bold = True
+            appendix_title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+            # Set background color for the Appendix title paragraph
+            appendix_title_paragraph_format = appendix_title_paragraph.paragraph_format
+            shading_elm = OxmlElement('w:shd')
+            shading_elm.set(qn('w:val'), 'clear')
+            shading_elm.set(qn('w:color'), 'auto')
+            shading_elm.set(qn('w:fill'), '00B0F0') # Blue color
+            appendix_title_paragraph_format._element.get_or_add_pPr().append(shading_elm)
+
+            # General Conditions
+            doc.add_paragraph() # Add a small space
+            doc.add_paragraph("General Conditions", style='Heading 3')
+            doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later", style='List Bullet')
+            doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.", style='List Bullet')
+            doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.", style='List Bullet')
+            doc.add_paragraph("Data is compared with Original Sea Trial", style='List Bullet')
+
+            # Hull Performance
+            doc.add_paragraph() # Add a small space
+            doc.add_paragraph("Hull Performance", style='Heading 3')
+
+            # Helper to add bullet points with specific colors
+            def add_colored_bullet(doc, text, color_rgb):
+                p = doc.add_paragraph(style='List Bullet')
+                run = p.add_run(text)
+                run.font.color.rgb = color_rgb
+
+            add_colored_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
+            add_colored_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
+            add_colored_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
+
+            # Machinery Performance
+            doc.add_paragraph() # Add a small space
+            doc.add_paragraph("Machinery Performance", style='Heading 3')
+            add_colored_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
+            add_colored_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
+            add_colored_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
+
 
         # Save to bytes buffer
         output = io.BytesIO()
