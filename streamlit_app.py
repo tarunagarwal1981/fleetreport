@@ -414,9 +414,11 @@ def get_me_efficiency(value):
 
 # Cached vessel loading function
 @st.cache_data(ttl=3600)
-def load_vessels_cached(lambda_service, search_term=None):
+def load_vessels_cached(lambda_url, search_term=None):
     """Cached function to load vessels."""
-    return lambda_service.get_vessels_list(search_term, use_cache=True)
+    # Create a temporary service instance for caching
+    temp_service = EnhancedLambdaService(lambda_url)
+    return temp_service.get_vessels_list(search_term, use_cache=True)
 
 # Styling Functions
 def style_condition_columns(row):
@@ -539,7 +541,7 @@ def main():
     
     # Load vessels with search
     with st.spinner("Loading vessels..."):
-        vessels = load_vessels_cached(lambda_service, search_query if search_query else None)
+        vessels = load_vessels_cached(LAMBDA_FUNCTION_URL, search_query if search_query else None)
     
     if vessels:
         st.markdown(f"📊 {len(vessels)} vessels available. {len(st.session_state.selected_vessels)} selected.")
