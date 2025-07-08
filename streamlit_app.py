@@ -695,7 +695,66 @@ def get_cell_color(cell_value):
     }
     return color_map.get(cell_value, None)
 
-def create_advanced_word_report(df, template_path="Fleet Performance Template.docx"):
+def create_simple_word_report(df, template_path="Fleet Performance Template.docx"):
+    """Create a simple Word report that definitely works."""
+    try:
+        if not os.path.exists(template_path):
+            st.error(f"Template file '{template_path}' not found in the repository root.")
+            return None
+        
+        doc = Document(template_path)
+        
+        # Find placeholder and replace
+        placeholder_found = False
+        
+        for paragraph in doc.paragraphs:
+            if "{{Template}}" in paragraph.text:
+                # Replace placeholder text
+                paragraph.text = paragraph.text.replace("{{Template}}", "Fleet Performance Report Data")
+                placeholder_found = True
+                
+                # Add a simple table
+                table = doc.add_table(rows=1, cols=len(df.columns))
+                
+                # Add headers
+                header_cells = table.rows[0].cells
+                for i, column_name in enumerate(df.columns):
+                    header_cells[i].text = str(column_name)
+                
+                # Add data rows
+                for _, row in df.iterrows():
+                    row_cells = table.add_row().cells
+                    for i, value in enumerate(row):
+                        cell_value = str(value) if pd.notna(value) else "N/A"
+                        row_cells[i].text = cell_value
+                
+                break
+        
+        if not placeholder_found:
+            # Add at the end
+            doc.add_paragraph("Fleet Performance Report")
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            
+            # Add headers
+            header_cells = table.rows[0].cells
+            for i, column_name in enumerate(df.columns):
+                header_cells[i].text = str(column_name)
+            
+            # Add data
+            for _, row in df.iterrows():
+                row_cells = table.add_row().cells
+                for i, value in enumerate(row):
+                    cell_value = str(value) if pd.notna(value) else "N/A"
+                    row_cells[i].text = cell_value
+        
+        # Save to buffer
+        output = io.BytesIO()
+        doc.save(output)
+        return output.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error creating simple Word report: {str(e)}")
+        return None
     """Create an advanced Word report with better formatting and multiple sections."""
     try:
         if not os.path.exists(template_path):
@@ -1458,7 +1517,8 @@ def main():
                 # Check if template exists
                 template_path = "Fleet Performance Template.docx"
                 if os.path.exists(template_path):
-                    word_data = create_advanced_word_report(st.session_state.report_data, template_path)
+                    # Try simple version first
+                    word_data = create_simple_word_report(st.session_state.report_data, template_path)
                     if word_data:
                         st.download_button(
                             label="📝 Download Word Report",
@@ -1550,34 +1610,7 @@ def main():
                         me_summary_df = pd.DataFrame(me_summary)
                         st.dataframe(me_summary_df, use_container_width=True)
                 else:
-                    st.info("No ME efficiency data available for analysis")"No hull condition data available for analysis")
-            
-            with tab2:
-                st.subheader("⚙️ ME Efficiency Distribution")
-                me_cols = [col for col in st.session_state.report_data.columns if 'ME Efficiency' in col]
-                
-                if me_cols:
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Latest month ME efficiency
-                        latest_me_data = st.session_state.report_data[me_cols[0]].value_counts()
-                        st.bar_chart(latest_me_data, use_container_width=True)
-                        st.caption(f"Distribution for {me_cols[0]}")
-                    
-                    with col2:
-                        # ME efficiency summary table
-                        me_summary = []
-                        for col in me_cols:
-                            month = col.replace("ME Efficiency ", "")
-                            counts = st.session_state.report_data[col].value_counts()
-                            me_summary.append({
-                                "Month": month,
-                                "Good": counts.get("Good", 0),
-                                "Average": counts.get("Average", 0),
-                                "Poor": counts.get("Poor", 0),
-                                "Anomalous": counts.get("Anomalous data", 0),
-                                "N/A": counts.get("N/A", 0)
+                    st.info("No ME efficiency data available for analysis")                "N/A": counts.get("N/A", 0)
                             })
                         
                         me_summary_df = pd.DataFrame(me_summary)
