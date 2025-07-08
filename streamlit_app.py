@@ -9,6 +9,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.styles.colors import Color
 import time
+from docx import Document
+from docx.shared import Inches
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import RGBColor
+import os
 
 # Page configuration
 st.set_page_config(
@@ -529,7 +535,262 @@ def style_condition_columns(row):
                 
     return styles
 
-def create_excel_download_with_styling(df, filename):
+def create_word_report_from_template(df, template_path="Fleet Performance Template.docx"):
+    """Create a Word report by replacing placeholder in template with styled table."""
+    try:
+        # Check if template file exists
+        if not os.path.exists(template_path):
+            st.error(f"Template file '{template_path}' not found in the repository root.")
+            return None
+        
+        # Load the template document
+        doc = Document(template_path)
+        
+        # Find and replace the placeholder with the table
+        placeholder_found = False
+        
+        # Search through all paragraphs for the placeholder
+        for paragraph in doc.paragraphs:
+            if "{{Template}}" in paragraph.text:
+                # Replace placeholder text
+                paragraph.text = paragraph.text.replace("{{Template}}", "")
+                placeholder_found = True
+                
+                # Create table after this paragraph
+                table = doc.add_table(rows=1, cols=len(df.columns))
+                table.style = 'Table Grid'
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                
+                # Add header row
+                header_cells = table.rows[0].cells
+                for i, column_name in enumerate(df.columns):
+                    header_cells[i].text = str(column_name)
+                    # Make header bold
+                    for run in header_cells[i].paragraphs[0].runs:
+                        run.font.bold = True
+                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Add data rows
+                for _, row in df.iterrows():
+                    row_cells = table.add_row().cells
+                    for i, value in enumerate(row):
+                        cell_value = str(value) if pd.notna(value) else "N/A"
+                        row_cells[i].text = cell_value
+                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
+                        # Apply color coding based on cell value and column name
+                        column_name = df.columns[i]
+                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
+                            color = get_cell_color(cell_value)
+                            if color:
+                                # Set background color
+                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
+                                cell_fill = cell_shading.get_or_add_shd()
+                                cell_fill.fill = color
+                
+                break
+        
+        if not placeholder_found:
+            st.warning("Placeholder '{{Template}}' not found in the template. Adding table at the end of document.")
+            # Add table at the end if placeholder not found
+            doc.add_paragraph()  # Add some space
+            doc.add_paragraph("Fleet Performance Report", style='Heading 1')
+            
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            table.style = 'Table Grid'
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Add header row
+            header_cells = table.rows[0].cells
+            for i, column_name in enumerate(df.columns):
+                header_cells[i].text = str(column_name)
+                for run in header_cells[i].paragraphs[0].runs:
+                    run.font.bold = True
+                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Add data rows
+            for _, row in df.iterrows():
+                row_cells = table.add_row().cells
+                for i, value in enumerate(row):
+                    cell_value = str(value) if pd.notna(value) else "N/A"
+                    row_cells[i].text = cell_value
+                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # Apply color coding
+                    column_name = df.columns[i]
+                    if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
+                        color = get_cell_color(cell_value)
+                        if color:
+                            cell_shading = row_cells[i]._tc.get_or_add_tcPr()
+                            cell_fill = cell_shading.get_or_add_shd()
+                            cell_fill.fill = color
+        
+        # Save to bytes buffer
+        output = io.BytesIO()
+        doc.save(output)
+        return output.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error creating Word report: {str(e)}")
+        return None
+
+def get_cell_color(cell_value):
+    """Get background color for table cell based on value."""
+    color_map = {
+        "Good": "D4EDDA",      # Light green
+        "Average": "FFF3CD",   # Light yellow
+        "Poor": "F8D7DA",      # Light red
+        "Anomalous data": "E0E0E0"  # Light gray
+    }
+    return color_map.get(cell_value, None)
+
+def create_advanced_word_report(df, template_path="Fleet Performance Template.docx"):
+    """Create an advanced Word report with better formatting and multiple sections."""
+    try:
+        if not os.path.exists(template_path):
+            st.error(f"Template file '{template_path}' not found in the repository root.")
+            return None
+        
+        doc = Document(template_path)
+        
+        # Find placeholder and replace with comprehensive report
+        placeholder_found = False
+        
+        for paragraph in doc.paragraphs:
+            if "{{Template}}" in paragraph.text:
+                # Clear the placeholder
+                paragraph.clear()
+                placeholder_found = True
+                
+                # Add report title
+                title_paragraph = doc.add_paragraph()
+                title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
+                title_run.font.size = Inches(0.2)
+                title_run.font.bold = True
+                title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Add generation date
+                date_paragraph = doc.add_paragraph()
+                date_run = date_paragraph.add_run(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+                date_run.font.italic = True
+                date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Add summary statistics
+                doc.add_paragraph()
+                doc.add_paragraph("Executive Summary", style='Heading 2')
+                
+                # Calculate summary stats
+                total_vessels = len(df)
+                hull_cols = [col for col in df.columns if 'Hull Condition' in col]
+                me_cols = [col for col in df.columns if 'ME Efficiency' in col]
+                
+                summary_text = f"This report covers {total_vessels} vessels with performance data across multiple months. "
+                
+                if hull_cols:
+                    latest_hull_col = hull_cols[0]
+                    good_hulls = len(df[df[latest_hull_col] == "Good"])
+                    hull_percentage = (good_hulls / total_vessels * 100) if total_vessels > 0 else 0
+                    summary_text += f"Hull condition analysis shows {good_hulls} vessels ({hull_percentage:.1f}%) with good hull condition. "
+                
+                if me_cols:
+                    latest_me_col = me_cols[0]
+                    good_me = len(df[df[latest_me_col] == "Good"])
+                    me_percentage = (good_me / total_vessels * 100) if total_vessels > 0 else 0
+                    summary_text += f"Main engine efficiency analysis indicates {good_me} vessels ({me_percentage:.1f}%) with good ME efficiency. "
+                
+                if 'Potential Fuel Saving' in df.columns:
+                    fuel_savings = df['Potential Fuel Saving'].apply(
+                        lambda x: float(x) if pd.notna(x) and str(x) != 'N/A' else 0
+                    )
+                    total_fuel_saving = fuel_savings.sum()
+                    avg_fuel_saving = fuel_savings.mean()
+                    summary_text += f"Total potential fuel saving across the fleet is {total_fuel_saving:.2f} MT/day with an average of {avg_fuel_saving:.2f} MT/day per vessel."
+                
+                doc.add_paragraph(summary_text)
+                
+                # Add detailed data table
+                doc.add_paragraph()
+                doc.add_paragraph("Detailed Performance Data", style='Heading 2')
+                
+                # Create the main data table
+                table = doc.add_table(rows=1, cols=len(df.columns))
+                table.style = 'Table Grid'
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                
+                # Style header row
+                header_cells = table.rows[0].cells
+                for i, column_name in enumerate(df.columns):
+                    header_cells[i].text = str(column_name)
+                    for run in header_cells[i].paragraphs[0].runs:
+                        run.font.bold = True
+                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # Set header background to dark blue
+                    cell_shading = header_cells[i]._tc.get_or_add_tcPr()
+                    cell_fill = cell_shading.get_or_add_shd()
+                    cell_fill.fill = "2F75B5"  # Dark blue
+                
+                # Add data rows with formatting
+                for _, row in df.iterrows():
+                    row_cells = table.add_row().cells
+                    for i, value in enumerate(row):
+                        cell_value = str(value) if pd.notna(value) else "N/A"
+                        row_cells[i].text = cell_value
+                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
+                        # Apply conditional formatting
+                        column_name = df.columns[i]
+                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
+                            color = get_cell_color(cell_value)
+                            if color:
+                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
+                                cell_fill = cell_shading.get_or_add_shd()
+                                cell_fill.fill = color
+                
+                # Add legend
+                doc.add_paragraph()
+                doc.add_paragraph("Legend", style='Heading 3')
+                
+                legend_table = doc.add_table(rows=5, cols=2)
+                legend_table.style = 'Table Grid'
+                
+                legend_data = [
+                    ("Good", "Performance within optimal range"),
+                    ("Average", "Performance within acceptable range"),
+                    ("Poor", "Performance requires attention"),
+                    ("Anomalous data", "Data outside normal parameters"),
+                    ("N/A", "Data not available for this period")
+                ]
+                
+                for i, (status, description) in enumerate(legend_data):
+                    legend_table.cell(i, 0).text = status
+                    legend_table.cell(i, 1).text = description
+                    
+                    # Apply color coding to legend
+                    if status in ["Good", "Average", "Poor", "Anomalous data"]:
+                        color = get_cell_color(status)
+                        if color:
+                            cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
+                            cell_fill = cell_shading.get_or_add_shd()
+                            cell_fill.fill = color
+                
+                break
+        
+        if not placeholder_found:
+            st.warning("Placeholder '{{Template}}' not found. Adding report at the end of document.")
+            # Add report at end if placeholder not found
+            doc.add_page_break()
+            # ... (same content as above)
+        
+        # Save to bytes buffer
+        output = io.BytesIO()
+        doc.save(output)
+        return output.getvalue()
+        
+    except Exception as e:
+        st.error(f"Error creating advanced Word report: {str(e)}")
+        return None
     """Create Excel file with styling."""
     output = io.BytesIO()
     wb = Workbook()
@@ -810,7 +1071,7 @@ def main():
         
         # Enhanced download section
         st.subheader("📥 Download Options")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -840,6 +1101,70 @@ def main():
                 mime="text/csv",
                 use_container_width=True
             )
+        
+        with col3:
+            # Word template download option
+            word_filename = f"fleet_performance_report_{timestamp}.docx"
+            
+            try:
+                # Check if template exists and offer different options
+                template_path = "Fleet Performance Template.docx"
+                if os.path.exists(template_path):
+                    word_data = create_advanced_word_report(st.session_state.report_data, template_path)
+                    if word_data:
+                        st.download_button(
+                            label="📝 Download Word Report",
+                            data=word_data,
+                            file_name=word_filename,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True
+                        )
+                    else:
+                        st.error("❌ Failed to create Word report")
+                else:
+                    st.warning("⚠️ Template file not found")
+                    st.caption("Place 'Fleet Performance Template.docx' in repo root")
+            except Exception as e:
+                st.error(f"❌ Error creating Word file: {str(e)}")
+        
+        # Template upload section
+        st.subheader("📤 Upload Custom Template")
+        uploaded_template = st.file_uploader(
+            "Upload your Word template (.docx)", 
+            type=['docx'],
+            help="Upload a Word template with {{Template}} placeholder where you want the table inserted"
+        )
+        
+        if uploaded_template is not None:
+            try:
+                # Save uploaded template temporarily
+                temp_template_path = f"temp_template_{timestamp}.docx"
+                with open(temp_template_path, "wb") as f:
+                    f.write(uploaded_template.getbuffer())
+                
+                # Create report using uploaded template
+                custom_word_data = create_advanced_word_report(st.session_state.report_data, temp_template_path)
+                
+                if custom_word_data:
+                    custom_filename = f"custom_fleet_report_{timestamp}.docx"
+                    st.download_button(
+                        label="📝 Download Custom Word Report",
+                        data=custom_word_data,
+                        file_name=custom_filename,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="custom_word_download"
+                    )
+                
+                # Clean up temporary file
+                if os.path.exists(temp_template_path):
+                    os.remove(temp_template_path)
+                    
+            except Exception as e:
+                st.error(f"❌ Error processing custom template: {str(e)}")
+                # Clean up on error
+                if 'temp_template_path' in locals() and os.path.exists(temp_template_path):
+                    os.remove(temp_template_path)
         
         # Enhanced data insights section
         with st.expander("📈 Data Insights & Analysis", expanded=False):
