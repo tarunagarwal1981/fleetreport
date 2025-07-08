@@ -94,7 +94,7 @@ def invoke_lambda_function_url(lambda_url, payload, timeout=30):
         st.error(f"Unexpected error: {str(e)}")
         return None
 
-# Cached vessel loading function (Fixed)
+# Cached vessel loading function
 @st.cache_data(ttl=3600)
 def fetch_all_vessels(lambda_url):
     """Fetch vessel names from Lambda function with a limit of 1200."""
@@ -580,467 +580,6 @@ def create_excel_download_with_styling(df, filename):
     wb.save(output)
     return output.getvalue()
 
-def create_word_report_from_template(df, template_path="Fleet Performance Template.docx"):
-    """Create a Word report by replacing placeholder in template with styled table."""
-    try:
-        # Check if template file exists
-        if not os.path.exists(template_path):
-            st.error(f"Template file '{template_path}' not found in the repository root.")
-            return None
-        
-        # Load the template document
-        doc = Document(template_path)
-        
-        # Find and replace the placeholder with the table
-        placeholder_found = False
-        
-        # Search through all paragraphs for the placeholder
-        for paragraph in doc.paragraphs:
-            if "{{Template}}" in paragraph.text:
-                # Replace placeholder text
-                paragraph.text = paragraph.text.replace("{{Template}}", "")
-                placeholder_found = True
-                
-                # Create table after this paragraph
-                table = doc.add_table(rows=1, cols=len(df.columns))
-                
-                # Apply basic table styling without using predefined styles
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                
-                # Add header row
-                header_cells = table.rows[0].cells
-                for i, column_name in enumerate(df.columns):
-                    header_cells[i].text = str(column_name)
-                    # Make header bold
-                    for run in header_cells[i].paragraphs[0].runs:
-                        run.font.bold = True
-                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Add data rows
-                for _, row in df.iterrows():
-                    row_cells = table.add_row().cells
-                    for i, value in enumerate(row):
-                        cell_value = str(value) if pd.notna(value) else "N/A"
-                        row_cells[i].text = cell_value
-                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
-                        # Apply color coding based on cell value and column name
-                        column_name = df.columns[i]
-                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                            color = get_cell_color(cell_value)
-                            if color:
-                                # Set background color
-                                try:
-                                    cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                    cell_fill = cell_shading.get_or_add_shd()
-                                    cell_fill.fill = color
-                                except:
-                                    pass  # Skip if shading fails
-                
-                break
-        
-        if not placeholder_found:
-            st.warning("Placeholder '{{Template}}' not found in the template. Adding table at the end of document.")
-            # Add table at the end if placeholder not found
-            doc.add_paragraph()  # Add some space
-            doc.add_paragraph("Fleet Performance Report")
-            
-            table = doc.add_table(rows=1, cols=len(df.columns))
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            # Add header row
-            header_cells = table.rows[0].cells
-            for i, column_name in enumerate(df.columns):
-                header_cells[i].text = str(column_name)
-                for run in header_cells[i].paragraphs[0].runs:
-                    run.font.bold = True
-                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            # Add data rows
-            for _, row in df.iterrows():
-                row_cells = table.add_row().cells
-                for i, value in enumerate(row):
-                    cell_value = str(value) if pd.notna(value) else "N/A"
-                    row_cells[i].text = cell_value
-                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # Apply color coding
-                    column_name = df.columns[i]
-                    if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                        color = get_cell_color(cell_value)
-                        if color:
-                            try:
-                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
-                            except:
-                                pass
-        
-        # Save to bytes buffer
-        output = io.BytesIO()
-        doc.save(output)
-        return output.getvalue()
-        
-    except Exception as e:
-        st.error(f"Error creating Word report: {str(e)}")
-        return None
-
-def get_cell_color(cell_value):
-    """Get background color for table cell based on value."""
-    color_map = {
-        "Good": "D4EDDA",      # Light green
-        "Average": "FFF3CD",   # Light yellow
-        "Poor": "F8D7DA",      # Light red
-        "Anomalous data": "E0E0E0"  # Light gray
-    }
-    return color_map.get(cell_value, None)
-
-def create_simple_word_report(df, template_path="Fleet Performance Template.docx"):
-    """Create a simple Word report that definitely works."""
-    try:
-        if not os.path.exists(template_path):
-            st.error(f"Template file '{template_path}' not found in the repository root.")
-            return None
-        
-        doc = Document(template_path)
-        
-        # Find placeholder and replace
-        placeholder_found = False
-        
-        for paragraph in doc.paragraphs:
-            if "{{Template}}" in paragraph.text:
-                # Replace placeholder text
-                paragraph.text = paragraph.text.replace("{{Template}}", "Fleet Performance Report Data")
-                placeholder_found = True
-                
-                # Add a simple table
-                table = doc.add_table(rows=1, cols=len(df.columns))
-                
-                # Add headers
-                header_cells = table.rows[0].cells
-                for i, column_name in enumerate(df.columns):
-                    header_cells[i].text = str(column_name)
-                
-                # Add data rows
-                for _, row in df.iterrows():
-                    row_cells = table.add_row().cells
-                    for i, value in enumerate(row):
-                        cell_value = str(value) if pd.notna(value) else "N/A"
-                        row_cells[i].text = cell_value
-                
-                break
-        
-        if not placeholder_found:
-            # Add at the end
-            doc.add_paragraph("Fleet Performance Report")
-            table = doc.add_table(rows=1, cols=len(df.columns))
-            
-            # Add headers
-            header_cells = table.rows[0].cells
-            for i, column_name in enumerate(df.columns):
-                header_cells[i].text = str(column_name)
-            
-            # Add data
-            for _, row in df.iterrows():
-                row_cells = table.add_row().cells
-                for i, value in enumerate(row):
-                    cell_value = str(value) if pd.notna(value) else "N/A"
-                    row_cells[i].text = cell_value
-        
-        # Save to buffer
-        output = io.BytesIO()
-        doc.save(output)
-        return output.getvalue()
-        
-    except Exception as e:
-        st.error(f"Error creating simple Word report: {str(e)}")
-        return None
-    """Create an advanced Word report with better formatting and multiple sections."""
-    try:
-        if not os.path.exists(template_path):
-            st.error(f"Template file '{template_path}' not found in the repository root.")
-            return None
-        
-        doc = Document(template_path)
-        
-        # Find placeholder and replace with comprehensive report
-        placeholder_found = False
-        
-        for paragraph in doc.paragraphs:
-            if "{{Template}}" in paragraph.text:
-                # Clear the placeholder
-                paragraph.clear()
-                placeholder_found = True
-                
-                # Add report title
-                title_paragraph = doc.add_paragraph()
-                title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
-                title_run.font.size = Inches(0.2)
-                title_run.font.bold = True
-                title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Add generation date
-                date_paragraph = doc.add_paragraph()
-                date_run = date_paragraph.add_run(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
-                date_run.font.italic = True
-                date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Add summary statistics
-                doc.add_paragraph()
-                summary_heading = doc.add_paragraph()
-                summary_heading_run = summary_heading.add_run("Executive Summary")
-                summary_heading_run.font.bold = True
-                summary_heading_run.font.size = Inches(0.15)
-                
-                # Calculate summary stats
-                total_vessels = len(df)
-                hull_cols = [col for col in df.columns if 'Hull Condition' in col]
-                me_cols = [col for col in df.columns if 'ME Efficiency' in col]
-                
-                summary_text = f"This report covers {total_vessels} vessels with performance data across multiple months. "
-                
-                if hull_cols:
-                    latest_hull_col = hull_cols[0]
-                    good_hulls = len(df[df[latest_hull_col] == "Good"])
-                    hull_percentage = (good_hulls / total_vessels * 100) if total_vessels > 0 else 0
-                    summary_text += f"Hull condition analysis shows {good_hulls} vessels ({hull_percentage:.1f}%) with good hull condition. "
-                
-                if me_cols:
-                    latest_me_col = me_cols[0]
-                    good_me = len(df[df[latest_me_col] == "Good"])
-                    me_percentage = (good_me / total_vessels * 100) if total_vessels > 0 else 0
-                    summary_text += f"Main engine efficiency analysis indicates {good_me} vessels ({me_percentage:.1f}%) with good ME efficiency. "
-                
-                if 'Potential Fuel Saving' in df.columns:
-                    fuel_savings = df['Potential Fuel Saving'].apply(
-                        lambda x: float(x) if pd.notna(x) and str(x) != 'N/A' else 0
-                    )
-                    total_fuel_saving = fuel_savings.sum()
-                    avg_fuel_saving = fuel_savings.mean()
-                    summary_text += f"Total potential fuel saving across the fleet is {total_fuel_saving:.2f} MT/day with an average of {avg_fuel_saving:.2f} MT/day per vessel."
-                
-                doc.add_paragraph(summary_text)
-                
-                # Add detailed data table
-                doc.add_paragraph()
-                data_heading = doc.add_paragraph()
-                data_heading_run = data_heading.add_run("Detailed Performance Data")
-                data_heading_run.font.bold = True
-                data_heading_run.font.size = Inches(0.15)
-                
-                # Create the main data table - NO STYLE APPLIED
-                table = doc.add_table(rows=1, cols=len(df.columns))
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                
-                # Style header row
-                header_cells = table.rows[0].cells
-                for i, column_name in enumerate(df.columns):
-                    header_cells[i].text = str(column_name)
-                    for run in header_cells[i].paragraphs[0].runs:
-                        run.font.bold = True
-                        try:
-                            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
-                        except:
-                            pass
-                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # Set header background to dark blue
-                    try:
-                        cell_shading = header_cells[i]._tc.get_or_add_tcPr()
-                        cell_fill = cell_shading.get_or_add_shd()
-                        cell_fill.fill = "2F75B5"  # Dark blue
-                    except:
-                        pass
-                
-                # Add data rows with formatting
-                for _, row in df.iterrows():
-                    row_cells = table.add_row().cells
-                    for i, value in enumerate(row):
-                        cell_value = str(value) if pd.notna(value) else "N/A"
-                        row_cells[i].text = cell_value
-                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
-                        # Apply conditional formatting
-                        column_name = df.columns[i]
-                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                            color = get_cell_color(cell_value)
-                            if color:
-                                try:
-                                    cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                    cell_fill = cell_shading.get_or_add_shd()
-                                    cell_fill.fill = color
-                                except:
-                                    pass
-                
-                # Add legend
-                doc.add_paragraph()
-                legend_heading = doc.add_paragraph()
-                legend_heading_run = legend_heading.add_run("Legend")
-                legend_heading_run.font.bold = True
-                
-                # Create legend table - NO STYLE APPLIED
-                legend_table = doc.add_table(rows=5, cols=2)
-                
-                legend_data = [
-                    ("Good", "Performance within optimal range"),
-                    ("Average", "Performance within acceptable range"),
-                    ("Poor", "Performance requires attention"),
-                    ("Anomalous data", "Data outside normal parameters"),
-                    ("N/A", "Data not available for this period")
-                ]
-                
-                for i, (status, description) in enumerate(legend_data):
-                    legend_table.cell(i, 0).text = status
-                    legend_table.cell(i, 1).text = description
-                    
-                    # Apply color coding to legend
-                    if status in ["Good", "Average", "Poor", "Anomalous data"]:
-                        color = get_cell_color(status)
-                        if color:
-                            try:
-                                cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
-                            except:
-                                pass
-                
-                break
-        
-        if not placeholder_found:
-            st.warning("Placeholder '{{Template}}' not found. Adding report at the end of document.")
-            # Add report at end if placeholder not found
-            doc.add_page_break()
-            # Add the same content as above but at the end
-            title_paragraph = doc.add_paragraph("Fleet Performance Analysis Report")
-            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            # Add basic table
-            table = doc.add_table(rows=1, cols=len(df.columns))
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            # Add header row
-            header_cells = table.rows[0].cells
-            for i, column_name in enumerate(df.columns):
-                header_cells[i].text = str(column_name)
-                for run in header_cells[i].paragraphs[0].runs:
-                    run.font.bold = True
-                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            # Add data rows
-            for _, row in df.iterrows():
-                row_cells = table.add_row().cells
-                for i, value in enumerate(row):
-                    cell_value = str(value) if pd.notna(value) else "N/A"
-                    row_cells[i].text = cell_value
-                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Save to bytes buffer
-        output = io.BytesIO()
-        doc.save(output)
-        return output.getvalue()
-        
-    except Exception as e:
-        st.error(f"Error creating advanced Word report: {str(e)}")
-        st.error(f"Error type: {type(e).__name__}")
-        return None
-    """Create a Word report by replacing placeholder in template with styled table."""
-    try:
-        # Check if template file exists
-        if not os.path.exists(template_path):
-            st.error(f"Template file '{template_path}' not found in the repository root.")
-            return None
-        
-        # Load the template document
-        doc = Document(template_path)
-        
-        # Find and replace the placeholder with the table
-        placeholder_found = False
-        
-        # Search through all paragraphs for the placeholder
-        for paragraph in doc.paragraphs:
-            if "{{Template}}" in paragraph.text:
-                # Replace placeholder text
-                paragraph.text = paragraph.text.replace("{{Template}}", "")
-                placeholder_found = True
-                
-                # Create table after this paragraph
-                table = doc.add_table(rows=1, cols=len(df.columns))
-                table.style = 'Table Grid'
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                
-                # Add header row
-                header_cells = table.rows[0].cells
-                for i, column_name in enumerate(df.columns):
-                    header_cells[i].text = str(column_name)
-                    # Make header bold
-                    for run in header_cells[i].paragraphs[0].runs:
-                        run.font.bold = True
-                    header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Add data rows
-                for _, row in df.iterrows():
-                    row_cells = table.add_row().cells
-                    for i, value in enumerate(row):
-                        cell_value = str(value) if pd.notna(value) else "N/A"
-                        row_cells[i].text = cell_value
-                        row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
-                        # Apply color coding based on cell value and column name
-                        column_name = df.columns[i]
-                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                            color = get_cell_color(cell_value)
-                            if color:
-                                # Set background color
-                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
-                
-                break
-        
-        if not placeholder_found:
-            st.warning("Placeholder '{{Template}}' not found in the template. Adding table at the end of document.")
-            # Add table at the end if placeholder not found
-            doc.add_paragraph()  # Add some space
-            doc.add_paragraph("Fleet Performance Report", style='Heading 1')
-            
-            table = doc.add_table(rows=1, cols=len(df.columns))
-            table.style = 'Table Grid'
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            # Add header row
-            header_cells = table.rows[0].cells
-            for i, column_name in enumerate(df.columns):
-                header_cells[i].text = str(column_name)
-                for run in header_cells[i].paragraphs[0].runs:
-                    run.font.bold = True
-                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            # Add data rows
-            for _, row in df.iterrows():
-                row_cells = table.add_row().cells
-                for i, value in enumerate(row):
-                    cell_value = str(value) if pd.notna(value) else "N/A"
-                    row_cells[i].text = cell_value
-                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # Apply color coding
-                    column_name = df.columns[i]
-                    if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
-                        color = get_cell_color(cell_value)
-                        if color:
-                            cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                            cell_fill = cell_shading.get_or_add_shd()
-                            cell_fill.fill = color
-        
-        # Save to bytes buffer
-        output = io.BytesIO()
-        doc.save(output)
-        return output.getvalue()
-        
-    except Exception as e:
-        st.error(f"Error creating Word report: {str(e)}")
-        return None
-
 def get_cell_color(cell_value):
     """Get background color for table cell based on value."""
     color_map = {
@@ -1130,13 +669,19 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     header_cells[i].text = str(column_name)
                     for run in header_cells[i].paragraphs[0].runs:
                         run.font.bold = True
-                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                        try:
+                            run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                        except Exception as e:
+                            st.warning(f"Could not set font color for header: {e}")
                     header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
                     # Set header background to dark blue
-                    cell_shading = header_cells[i]._tc.get_or_add_tcPr()
-                    cell_fill = cell_shading.get_or_add_shd()
-                    cell_fill.fill = "2F75B5"  # Dark blue
+                    try:
+                        cell_shading = header_cells[i]._tc.get_or_add_tcPr()
+                        cell_fill = cell_shading.get_or_add_shd()
+                        cell_fill.fill = "2F75B5"  # Dark blue
+                    except Exception as e:
+                        st.warning(f"Could not set header background color: {e}")
                 
                 # Add data rows with formatting
                 for _, row in df.iterrows():
@@ -1151,9 +696,12 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                             color = get_cell_color(cell_value)
                             if color:
-                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
-                                cell_fill = cell_shading.get_or_add_shd()
-                                cell_fill.fill = color
+                                try:
+                                    cell_shading = row_cells[i]._tc.get_or_add_tcPr()
+                                    cell_fill = cell_shading.get_or_add_shd()
+                                    cell_fill.fill = color
+                                except Exception as e:
+                                    st.warning(f"Could not set cell background color for data: {e}")
                 
                 # Add legend
                 doc.add_paragraph()
@@ -1178,17 +726,144 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     if status in ["Good", "Average", "Poor", "Anomalous data"]:
                         color = get_cell_color(status)
                         if color:
-                            cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
-                            cell_fill = cell_shading.get_or_add_shd()
-                            cell_fill.fill = color
+                            try:
+                                cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
+                                cell_fill = cell_shading.get_or_add_shd()
+                                cell_fill.fill = color
+                            except Exception as e:
+                                st.warning(f"Could not set cell background color for legend: {e}")
                 
-                break
+                break # Exit loop after finding and processing the placeholder
         
         if not placeholder_found:
             st.warning("Placeholder '{{Template}}' not found. Adding report at the end of document.")
             # Add report at end if placeholder not found
             doc.add_page_break()
-            # ... (same content as above)
+            
+            # Add report title
+            title_paragraph = doc.add_paragraph()
+            title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
+            title_run.font.size = Inches(0.2)
+            title_run.font.bold = True
+            title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Add generation date
+            date_paragraph = doc.add_paragraph()
+            date_run = date_paragraph.add_run(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+            date_run.font.italic = True
+            date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            
+            # Add summary statistics
+            doc.add_paragraph()
+            doc.add_paragraph("Executive Summary", style='Heading 2')
+            
+            # Calculate summary stats
+            total_vessels = len(df)
+            hull_cols = [col for col in df.columns if 'Hull Condition' in col]
+            me_cols = [col for col in df.columns if 'ME Efficiency' in col]
+            
+            summary_text = f"This report covers {total_vessels} vessels with performance data across multiple months. "
+            
+            if hull_cols:
+                latest_hull_col = hull_cols[0]
+                good_hulls = len(df[df[latest_hull_col] == "Good"])
+                hull_percentage = (good_hulls / total_vessels * 100) if total_vessels > 0 else 0
+                summary_text += f"Hull condition analysis shows {good_hulls} vessels ({hull_percentage:.1f}%) with good hull condition. "
+            
+            if me_cols:
+                latest_me_col = me_cols[0]
+                good_me = len(df[df[latest_me_col] == "Good"])
+                me_percentage = (good_me / total_vessels * 100) if total_vessels > 0 else 0
+                summary_text += f"Main engine efficiency analysis indicates {good_me} vessels ({me_percentage:.1f}%) with good ME efficiency. "
+            
+            if 'Potential Fuel Saving' in df.columns:
+                fuel_savings = df['Potential Fuel Saving'].apply(
+                    lambda x: float(x) if pd.notna(x) and str(x) != 'N/A' else 0
+                )
+                total_fuel_saving = fuel_savings.sum()
+                avg_fuel_saving = fuel_savings.mean()
+                summary_text += f"Total potential fuel saving across the fleet is {total_fuel_saving:.2f} MT/day with an average of {avg_fuel_saving:.2f} MT/day per vessel."
+            
+            doc.add_paragraph(summary_text)
+            
+            # Add detailed data table
+            doc.add_paragraph()
+            doc.add_paragraph("Detailed Performance Data", style='Heading 2')
+            
+            # Create the main data table
+            table = doc.add_table(rows=1, cols=len(df.columns))
+            table.style = 'Table Grid'
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            
+            # Style header row
+            header_cells = table.rows[0].cells
+            for i, column_name in enumerate(df.columns):
+                header_cells[i].text = str(column_name)
+                for run in header_cells[i].paragraphs[0].runs:
+                    run.font.bold = True
+                    try:
+                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                    except Exception as e:
+                        st.warning(f"Could not set font color for header: {e}")
+                header_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Set header background to dark blue
+                try:
+                    cell_shading = header_cells[i]._tc.get_or_add_tcPr()
+                    cell_fill = cell_shading.get_or_add_shd()
+                    cell_fill.fill = "2F75B5"  # Dark blue
+                except Exception as e:
+                    st.warning(f"Could not set header background color: {e}")
+            
+            # Add data rows with formatting
+            for _, row in df.iterrows():
+                row_cells = table.add_row().cells
+                for i, value in enumerate(row):
+                    cell_value = str(value) if pd.notna(value) else "N/A"
+                    row_cells[i].text = cell_value
+                    row_cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    
+                    # Apply conditional formatting
+                    column_name = df.columns[i]
+                    if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
+                        color = get_cell_color(cell_value)
+                        if color:
+                            try:
+                                cell_shading = row_cells[i]._tc.get_or_add_tcPr()
+                                cell_fill = cell_shading.get_or_add_shd()
+                                cell_fill.fill = color
+                            except Exception as e:
+                                st.warning(f"Could not set cell background color for data: {e}")
+            
+            # Add legend
+            doc.add_paragraph()
+            doc.add_paragraph("Legend", style='Heading 3')
+            
+            legend_table = doc.add_table(rows=5, cols=2)
+            legend_table.style = 'Table Grid'
+            
+            legend_data = [
+                ("Good", "Performance within optimal range"),
+                ("Average", "Performance within acceptable range"),
+                ("Poor", "Performance requires attention"),
+                ("Anomalous data", "Data outside normal parameters"),
+                ("N/A", "Data not available for this period")
+            ]
+            
+            for i, (status, description) in enumerate(legend_data):
+                legend_table.cell(i, 0).text = status
+                legend_table.cell(i, 1).text = description
+                
+                # Apply color coding to legend
+                if status in ["Good", "Average", "Poor", "Anomalous data"]:
+                    color = get_cell_color(status)
+                    if color:
+                        try:
+                            cell_shading = legend_table.cell(i, 0)._tc.get_or_add_tcPr()
+                            cell_fill = cell_shading.get_or_add_shd()
+                            cell_fill.fill = color
+                        except Exception as e:
+                            st.warning(f"Could not set cell background color for legend: {e}")
         
         # Save to bytes buffer
         output = io.BytesIO()
@@ -1197,50 +872,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
         
     except Exception as e:
         st.error(f"Error creating advanced Word report: {str(e)}")
+        st.error(f"Error type: {type(e).__name__}")
         return None
-    """Create Excel file with styling."""
-    output = io.BytesIO()
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Vessel Report"
-
-    # Write headers
-    for col_idx, col_name in enumerate(df.columns, 1):
-        ws.cell(row=1, column=col_idx, value=col_name).font = Font(bold=True)
-
-    # Write data and apply styling
-    for row_idx, row_data in df.iterrows():
-        for col_idx, (col_name, cell_value) in enumerate(row_data.items(), 1):
-            cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value)
-            
-            if 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
-                if cell_value == "Good":
-                    cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
-                elif cell_value == "Average":
-                    cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
-                elif cell_value == "Poor":
-                    cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
-                elif cell_value == "Anomalous data":
-                    cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-                cell.font = Font(color="000000")
-            elif col_name == 'YTD CII':
-                cell.alignment = Alignment(horizontal='center')
-
-    # Auto-adjust column widths
-    for col_idx, column in enumerate(df.columns, 1):
-        max_length = 0
-        column_letter = get_column_letter(col_idx)
-        for cell in ws[column_letter]:
-            try:
-                if cell.value is not None and len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = (max_length + 2) * 1.2
-        ws.column_dimensions[column_letter].width = adjusted_width
-
-    wb.save(output)
-    return output.getvalue()
 
 # Main Application
 def main():
@@ -1367,7 +1000,9 @@ def main():
         # Report generation options
         col1, col2 = st.columns(2)
         with col1:
-            batch_size = st.selectbox(
+            # The batch_size variable is not directly used in query_report_data as it's hardcoded there.
+            # If you want to make it configurable, you'd need to pass it to query_report_data.
+            batch_size_ui = st.selectbox(
                 "Batch Size (vessels per batch):",
                 [5, 10, 15, 20],
                 index=1,
@@ -1386,15 +1021,11 @@ def main():
         if st.button("🚀 Generate Enhanced Performance Report", type="primary", use_container_width=True):
             with st.spinner("Generating enhanced report with better progress tracking..."):
                 try:
-                    # Temporarily override batch size in the function
-                    original_query_function = query_report_data
-                    
-                    def query_with_custom_batch(lambda_url, vessel_names):
-                        # This is a wrapper to use custom batch size
-                        return original_query_function(lambda_url, vessel_names)
-                    
                     start_time = time.time()
-                    st.session_state.report_data = query_with_custom_batch(
+                    # Pass the timeout_setting to the invoke_lambda_function_url
+                    # The batch_size_ui is not directly used here, as query_report_data has a hardcoded batch_size.
+                    # If you want to use batch_size_ui, you'd need to modify query_report_data to accept it.
+                    st.session_state.report_data = query_report_data(
                         LAMBDA_FUNCTION_URL, selected_vessels_list
                     )
                     
@@ -1517,8 +1148,7 @@ def main():
                 # Check if template exists
                 template_path = "Fleet Performance Template.docx"
                 if os.path.exists(template_path):
-                    # Try simple version first
-                    word_data = create_simple_word_report(st.session_state.report_data, template_path)
+                    word_data = create_advanced_word_report(st.session_state.report_data, template_path)
                     if word_data:
                         st.download_button(
                             label="📝 Download Word Report",
@@ -1604,12 +1234,7 @@ def main():
                                 "Average": counts.get("Average", 0),
                                 "Poor": counts.get("Poor", 0),
                                 "Anomalous": counts.get("Anomalous data", 0),
-                            })
-                        
-                        me_summary_df = pd.DataFrame(me_summary)
-                        st.dataframe(me_summary_df, use_container_width=True)
-                else:
-                    st.info("No ME efficiency data available for analysis")                "N/A": counts.get("N/A", 0)
+                                "N/A": counts.get("N/A", 0)
                             })
                         
                         me_summary_df = pd.DataFrame(me_summary)
@@ -1766,7 +1391,7 @@ def main():
     with col3:
         stats = st.session_state.performance_stats
         if stats['total_requests'] > 0:
-            st.markdown(f"*{stats['total_requests']} requests • {stats['avg_response_time']:.2f}s avg*")
+            st.markdown(f"*{stats['total_requests']} requests • {stats['avg_response_time']:.2f}s avg*}")
 
 if __name__ == "__main__":
     main()
