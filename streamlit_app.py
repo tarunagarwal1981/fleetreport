@@ -38,23 +38,18 @@ if 'report_data' not in st.session_state:
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 
-if 'performance_stats' not in st.session_state:
-    st.session_state.performance_stats = {
-        'total_requests': 0,
-        'total_time': 0,
-        'avg_response_time': 0
-    }
+# --- HARDCODED SETTINGS ---
+BATCH_SIZE = 10
+REQUEST_TIMEOUT = 60
+# --- END HARDCODED SETTINGS ---
 
 # Enhanced Lambda Invocation Helper (Backwards Compatible)
 def invoke_lambda_function_url(lambda_url, payload, timeout=30):
-    """Invoke Lambda function via its Function URL using HTTP POST with performance tracking."""
+    """Invoke Lambda function via its Function URL using HTTP POST."""
     try:
         start_time = time.time()
         headers = {'Content-Type': 'application/json'}
         json_payload = json.dumps(payload)
-        
-        # Update request count
-        st.session_state.performance_stats['total_requests'] += 1
         
         response = requests.post(
             lambda_url, 
@@ -63,13 +58,7 @@ def invoke_lambda_function_url(lambda_url, payload, timeout=30):
             timeout=timeout
         )
         
-        # Calculate response time
         response_time = time.time() - start_time
-        st.session_state.performance_stats['total_time'] += response_time
-        st.session_state.performance_stats['avg_response_time'] = (
-            st.session_state.performance_stats['total_time'] / 
-            st.session_state.performance_stats['total_requests']
-        )
         
         if response.status_code != 200:
             st.error(f"HTTP error: {response.status_code} {response.reason} for url: {lambda_url}")
@@ -102,7 +91,7 @@ def fetch_all_vessels(lambda_url):
     """Fetch vessel names from Lambda function with a limit of 1200."""
     query = "SELECT vessel_name FROM vessel_particulars ORDER BY vessel_name LIMIT 1200"
     
-    result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
+    result = invoke_lambda_function_url(lambda_url, {"sql_query": query}, timeout=REQUEST_TIMEOUT) # Use hardcoded timeout
     
     if result:
         extracted_vessel_names = []
@@ -155,7 +144,7 @@ def query_report_data(lambda_url, vessel_names):
     prev_prev_prev_month_me_col_name = f"ME Efficiency {last_day_prev_prev_prev_month_hull.strftime('%b %y')}"
 
     # Process vessels in smaller batches with enhanced progress tracking
-    batch_size = 10
+    # Use the hardcoded BATCH_SIZE
     all_fuel_saving_data = []
     all_cii_data = []
     all_prev_month_hull_data = []
@@ -165,15 +154,15 @@ def query_report_data(lambda_url, vessel_names):
     all_prev_prev_month_me_data = []
     all_prev_prev_prev_month_me_data = []
     
-    total_batches = (len(vessel_names) + batch_size - 1) // batch_size
+    total_batches = (len(vessel_names) + BATCH_SIZE - 1) // BATCH_SIZE
     
     # Create progress bar and status text
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for i in range(0, len(vessel_names), batch_size):
-        batch_vessels = vessel_names[i:i+batch_size]
-        batch_num = i//batch_size + 1
+    for i in range(0, len(vessel_names), BATCH_SIZE): # Use BATCH_SIZE here
+        batch_vessels = vessel_names[i:i+BATCH_SIZE] # Use BATCH_SIZE here
+        batch_num = i//BATCH_SIZE + 1 # Use BATCH_SIZE here
         
         # Update progress
         progress = batch_num / total_batches
@@ -268,7 +257,7 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         # Execute each query
         for query_name, query, data_list in batch_queries:
             with st.spinner(f"Fetching {query_name} data..."):
-                result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
+                result = invoke_lambda_function_url(lambda_url, {"sql_query": query}, timeout=REQUEST_TIMEOUT) # Use hardcoded timeout
                 if result:
                     data_list.extend(result)
 
@@ -655,41 +644,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 date_run.font.italic = True
                 date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 
-                # Add summary statistics
-                doc.add_paragraph()
-                doc.add_paragraph("Executive Summary", style='Heading 2')
-                
-                # Calculate summary stats
-                total_vessels = len(df)
-                hull_cols = [col for col in df.columns if 'Hull Condition' in col]
-                me_cols = [col for col in df.columns if 'ME Efficiency' in col]
-                
-                summary_text = f"This report covers {total_vessels} vessels with performance data across multiple months. "
-                
-                if hull_cols:
-                    latest_hull_col = hull_cols[0]
-                    good_hulls = len(df[df[latest_hull_col] == "Good"])
-                    hull_percentage = (good_hulls / total_vessels * 100) if total_vessels > 0 else 0
-                    summary_text += f"Hull condition analysis shows {good_hulls} vessels ({hull_percentage:.1f}%) with good hull condition. "
-                
-                if me_cols:
-                    latest_me_col = me_cols[0]
-                    good_me = len(df[df[latest_me_col] == "Good"])
-                    me_percentage = (good_me / total_vessels * 100) if total_vessels > 0 else 0
-                    summary_text += f"Main engine efficiency analysis indicates {good_me} vessels ({me_percentage:.1f}%) with good ME efficiency. "
-                
-                if 'Potential Fuel Saving' in df.columns:
-                    fuel_savings = df['Potential Fuel Saving'].apply(
-                        lambda x: float(x) if pd.notna(x) and str(x) != 'N/A' else 0
-                    )
-                    total_fuel_saving = fuel_savings.sum()
-                    avg_fuel_saving = fuel_savings.mean()
-                    summary_text += f"Total potential fuel saving across the fleet is {total_fuel_saving:.2f} MT/day with an average of {avg_fuel_saving:.2f} MT/day per vessel."
-                
-                doc.add_paragraph(summary_text)
-                
-                # Add detailed data table
-                doc.add_paragraph()
+                # Add detailed data table heading
+                doc.add_paragraph() # Add a small space after date
                 doc.add_paragraph("Detailed Performance Data", style='Heading 2')
                 
                 # Create the main data table
@@ -747,50 +703,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                             right={"sz": 6, "val": "single", "color": "000000"},
                         )
                 
-                # Add legend
-                doc.add_paragraph()
-                doc.add_paragraph("Legend", style='Heading 3')
-                
-                legend_table = doc.add_table(rows=5, cols=2)
-                legend_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                
-                legend_data = [
-                    ("Good", "Performance within optimal range"),
-                    ("Average", "Performance within acceptable range"),
-                    ("Poor", "Performance requires attention"),
-                    ("Anomalous data", "Data outside normal parameters"),
-                    ("N/A", "Data not available for this period")
-                ]
-                
-                for i, (status, description) in enumerate(legend_data):
-                    cell_status = legend_table.cell(i, 0)
-                    cell_description = legend_table.cell(i, 1)
-                    
-                    cell_status.text = status
-                    cell_description.text = description
-                    
-                    # Apply color coding to legend
-                    if status in ["Good", "Average", "Poor", "Anomalous data"]:
-                        color_hex = get_cell_color(status)
-                        if color_hex:
-                            set_cell_shading(cell_status, color_hex)
-                    
-                    # Apply borders to legend cells
-                    set_cell_border(
-                        cell_status,
-                        top={"sz": 6, "val": "single", "color": "000000"},
-                        left={"sz": 6, "val": "single", "color": "000000"},
-                        bottom={"sz": 6, "val": "single", "color": "000000"},
-                        right={"sz": 6, "val": "single", "color": "000000"},
-                    )
-                    set_cell_border(
-                        cell_description,
-                        top={"sz": 6, "val": "single", "color": "000000"},
-                        left={"sz": 6, "val": "single", "color": "000000"},
-                        bottom={"sz": 6, "val": "single", "color": "000000"},
-                        right={"sz": 6, "val": "single", "color": "000000"},
-                    )
-                
                 break # Exit loop after finding and processing the placeholder
         
         if not placeholder_found:
@@ -811,41 +723,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             date_run.font.italic = True
             date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             
-            # Add summary statistics
-            doc.add_paragraph()
-            doc.add_paragraph("Executive Summary", style='Heading 2')
-            
-            # Calculate summary stats
-            total_vessels = len(df)
-            hull_cols = [col for col in df.columns if 'Hull Condition' in col]
-            me_cols = [col for col in df.columns if 'ME Efficiency' in col]
-            
-            summary_text = f"This report covers {total_vessels} vessels with performance data across multiple months. "
-            
-            if hull_cols:
-                latest_hull_col = hull_cols[0]
-                good_hulls = len(df[df[latest_hull_col] == "Good"])
-                hull_percentage = (good_hulls / total_vessels * 100) if total_vessels > 0 else 0
-                summary_text += f"Hull condition analysis shows {good_hulls} vessels ({hull_percentage:.1f}%) with good hull condition. "
-            
-            if me_cols:
-                latest_me_col = me_cols[0]
-                good_me = len(df[df[latest_me_col] == "Good"])
-                me_percentage = (good_me / total_vessels * 100) if total_vessels > 0 else 0
-                summary_text += f"Main engine efficiency analysis indicates {good_me} vessels ({me_percentage:.1f}%) with good ME efficiency. "
-            
-            if 'Potential Fuel Saving' in df.columns:
-                fuel_savings = df['Potential Fuel Saving'].apply(
-                    lambda x: float(x) if pd.notna(x) and str(x) != 'N/A' else 0
-                )
-                total_fuel_saving = fuel_savings.sum()
-                avg_fuel_saving = fuel_savings.mean()
-                summary_text += f"Total potential fuel saving across the fleet is {total_fuel_saving:.2f} MT/day with an average of {avg_fuel_saving:.2f} MT/day per vessel."
-            
-            doc.add_paragraph(summary_text)
-            
-            # Add detailed data table
-            doc.add_paragraph()
+            # Add detailed data table heading
+            doc.add_paragraph() # Add a small space after date
             doc.add_paragraph("Detailed Performance Data", style='Heading 2')
             
             # Create the main data table
@@ -902,50 +781,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         bottom={"sz": 6, "val": "single", "color": "000000"},
                         right={"sz": 6, "val": "single", "color": "000000"},
                     )
-            
-            # Add legend
-            doc.add_paragraph()
-            doc.add_paragraph("Legend", style='Heading 3')
-            
-            legend_table = doc.add_table(rows=5, cols=2)
-            legend_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-            
-            legend_data = [
-                ("Good", "Performance within optimal range"),
-                ("Average", "Performance within acceptable range"),
-                ("Poor", "Performance requires attention"),
-                ("Anomalous data", "Data outside normal parameters"),
-                ("N/A", "Data not available for this period")
-            ]
-            
-            for i, (status, description) in enumerate(legend_data):
-                cell_status = legend_table.cell(i, 0)
-                cell_description = legend_table.cell(i, 1)
-                
-                cell_status.text = status
-                cell_description.text = description
-                
-                # Apply color coding to legend
-                if status in ["Good", "Average", "Poor", "Anomalous data"]:
-                    color_hex = get_cell_color(status)
-                    if color_hex:
-                        set_cell_shading(cell_status, color_hex)
-                
-                # Apply borders to legend cells
-                set_cell_border(
-                    cell_status,
-                    top={"sz": 6, "val": "single", "color": "000000"},
-                    left={"sz": 6, "val": "single", "color": "000000"},
-                    bottom={"sz": 6, "val": "single", "color": "000000"},
-                    right={"sz": 6, "val": "single", "color": "000000"},
-                )
-                set_cell_border(
-                    cell_description,
-                    top={"sz": 6, "val": "single", "color": "000000"},
-                    left={"sz": 6, "val": "single", "color": "000000"},
-                    bottom={"sz": 6, "val": "single", "color": "000000"},
-                    right={"sz": 6, "val": "single", "color": "000000"},
-                )
         
         # Save to bytes buffer
         output = io.BytesIO()
@@ -966,24 +801,7 @@ def main():
     st.title("🚢 Enhanced Vessel Performance Report Tool")
     st.markdown("Select vessels and generate a comprehensive performance report with improved processing and UI.")
     
-    # Performance metrics sidebar
-    with st.sidebar:
-        st.header("📊 Performance Metrics")
-        stats = st.session_state.performance_stats
-        st.metric("Total Requests", stats["total_requests"])
-        st.metric("Avg Response Time", f"{stats['avg_response_time']:.2f}s")
-        
-        if st.button("🔄 Reset Stats"):
-            st.session_state.performance_stats = {
-                'total_requests': 0,
-                'total_time': 0,
-                'avg_response_time': 0
-            }
-            st.success("Stats reset!")
-        
-        if st.button("🗑️ Clear Cache"):
-            st.cache_data.clear()
-            st.success("Cache cleared!")
+    # Removed performance metrics sidebar
     
     # Load vessels
     st.header("1. Select Vessels")
@@ -1071,64 +889,39 @@ def main():
             with st.expander(f"📋 Selected Vessels ({len(selected_vessels_list)})", expanded=False):
                 for i, vessel in enumerate(sorted(selected_vessels_list), 1):
                     st.write(f"{i}. {vessel}")
+        else:
+            st.info("💡 Use the search box above to find specific vessels, then select them using the checkboxes.")
     else:
         st.error("❌ Failed to load vessels. Please check your connection and try again.")
         selected_vessels_list = []
     
-    # Generate report section
-    st.header("2. Generate Enhanced Report")
+    # Removed "Generate Enhanced Report" section.
+    # The report generation will now be triggered implicitly when selected_vessels_list is not empty
+    # and the user interacts with the download buttons.
     
-    if selected_vessels_list:
-        # Report generation options
-        col1, col2 = st.columns(2)
-        with col1:
-            # The batch_size variable is not directly used in query_report_data as it's hardcoded there.
-            # If you want to make it configurable, you'd need to pass it to query_report_data.
-            batch_size_ui = st.selectbox(
-                "Batch Size (vessels per batch):",
-                [5, 10, 15, 20],
-                index=1,
-                help="Smaller batches = more stable, larger batches = faster"
-            )
-        
-        with col2:
-            timeout_setting = st.selectbox(
-                "Request Timeout:",
-                [15, 30, 45, 60],
-                index=1,
-                help="Increase if experiencing timeout errors"
-            )
-        
-        # Generate button with enhanced styling
-        if st.button("🚀 Generate Enhanced Performance Report", type="primary", use_container_width=True):
-            with st.spinner("Generating enhanced report with better progress tracking..."):
-                try:
-                    start_time = time.time()
-                    # Pass the timeout_setting to the invoke_lambda_function_url
-                    # The batch_size_ui is not directly used here, as query_report_data has a hardcoded batch_size.
-                    # If you want to use batch_size_ui, you'd need to modify query_report_data to accept it.
-                    st.session_state.report_data = query_report_data(
-                        LAMBDA_FUNCTION_URL, selected_vessels_list
-                    )
+    # Implicitly generate report data if vessels are selected and report_data is not yet available
+    if selected_vessels_list and st.session_state.report_data is None:
+        with st.spinner("Generating report data..."):
+            try:
+                start_time = time.time()
+                st.session_state.report_data = query_report_data(
+                    LAMBDA_FUNCTION_URL, selected_vessels_list
+                )
+                generation_time = time.time() - start_time
+                
+                if not st.session_state.report_data.empty:
+                    st.success(f"✅ Report data generated successfully in {generation_time:.2f} seconds!")
+                    st.balloons()  # Celebration animation
+                else:
+                    st.warning("⚠️ No data found for the selected vessels.")
                     
-                    generation_time = time.time() - start_time
-                    
-                    if not st.session_state.report_data.empty:
-                        st.success(f"✅ Report generated successfully in {generation_time:.2f} seconds!")
-                        st.balloons()  # Celebration animation
-                    else:
-                        st.warning("⚠️ No data found for the selected vessels.")
-                        
-                except Exception as e:
-                    st.error(f"❌ Error generating report: {str(e)}")
-                    st.session_state.report_data = None
-    else:
-        st.warning("⚠️ Please select at least one vessel to generate a report.")
-        st.info("💡 Use the search box above to find specific vessels, then select them using the checkboxes.")
+            except Exception as e:
+                st.error(f"❌ Error generating report data: {str(e)}")
+                st.session_state.report_data = None
     
     # Enhanced report display
     if st.session_state.report_data is not None and not st.session_state.report_data.empty:
-        st.header("3. 📊 Enhanced Report Results")
+        st.header("2. 📊 Enhanced Report Results") # Changed from 3 to 2
         
         # Enhanced report summary with metrics
         st.subheader("📈 Report Summary")
@@ -1410,8 +1203,6 @@ def main():
         **📊 Better Data Processing:**
         - Enhanced progress tracking with visual progress bars
         - Improved error handling and user feedback
-        - Performance metrics tracking in sidebar
-        - Configurable batch sizes and timeouts
         - Success animations and better visual feedback
         
         **📈 Advanced Analytics:**
@@ -1431,10 +1222,8 @@ def main():
         
         1. **🔍 Search & Filter**: Type in the search box to find specific vessels
         2. **✅ Select Vessels**: Use checkboxes or quick selection buttons
-        3. **⚙️ Configure**: Choose batch size and timeout based on your needs
-        4. **🚀 Generate**: Click the generate button for enhanced processing
-        5. **📊 Analyze**: Review metrics, charts, and trends in the results
-        6. **📥 Download**: Export your report in Excel or CSV format
+        3. **📊 Analyze**: Review metrics, charts, and trends in the results
+        4. **📥 Download**: Export your report in Excel or CSV format
         
         ### 📊 Report Columns:
         
@@ -1456,24 +1245,17 @@ def main():
         
         ### 💡 Performance Tips:
         
-        - Use smaller batch sizes (5-10) for more stable processing
-        - Increase timeout if you experience timeout errors
         - Clear cache occasionally to ensure fresh data
         - Use search to narrow down vessels before bulk selection
-        - Monitor performance metrics in the sidebar
         """)
     
     # Enhanced footer
     st.markdown("---")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2) # Reduced to 2 columns as performance metrics are removed
     with col1:
         st.markdown("*Enhanced with improved UI & analytics*")
     with col2:
         st.markdown("*Built with Streamlit 🎈 and Python*")
-    with col3:
-        stats = st.session_state.performance_stats
-        if stats['total_requests'] > 0:
-            st.markdown(f"*{stats['total_requests']} requests • {stats['avg_response_time']:.2f}s avg*}}")
 
 if __name__ == "__main__":
     main()
