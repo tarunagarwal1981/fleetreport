@@ -769,7 +769,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 data_heading_run.font.bold = True
                 data_heading_run.font.size = Inches(0.15)
                 
-                # Create the main data table
+                # Create the main data table - NO STYLE APPLIED
                 table = doc.add_table(rows=1, cols=len(df.columns))
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
@@ -819,6 +819,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 legend_heading_run = legend_heading.add_run("Legend")
                 legend_heading_run.font.bold = True
                 
+                # Create legend table - NO STYLE APPLIED
                 legend_table = doc.add_table(rows=5, cols=2)
                 
                 legend_data = [
@@ -881,6 +882,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
         
     except Exception as e:
         st.error(f"Error creating advanced Word report: {str(e)}")
+        st.error(f"Error type: {type(e).__name__}")
         return None
     """Create a Word report by replacing placeholder in template with styled table."""
     try:
@@ -1547,17 +1549,67 @@ def main():
             with tab3:
                 st.subheader("📊 Performance Trends")
                 
-                # Combined trend analysis
+                # Combined trend analysis with better data validation
                 hull_cols = [col for col in st.session_state.report_data.columns if 'Hull Condition' in col]
                 me_cols = [col for col in st.session_state.report_data.columns if 'ME Efficiency' in col]
                 
                 if len(hull_cols) >= 2:
                     st.write("**Hull Condition Trends (% Good)**")
                     hull_trend_data = []
+                    has_valid_data = False
+                    
                     for col in hull_cols:
                         month = col.replace("Hull Condition ", "")
                         total_with_data = len(st.session_state.report_data[st.session_state.report_data[col] != "N/A"])
                         good_count = len(st.session_state.report_data[st.session_state.report_data[col] == "Good"])
+                        
+                        if total_with_data > 0:
+                            percentage = (good_count / total_with_data * 100)
+                            hull_trend_data.append({"Month": month, "Good %": percentage})
+                            has_valid_data = True
+                        else:
+                            hull_trend_data.append({"Month": month, "Good %": 0})
+                    
+                    if has_valid_data and hull_trend_data:
+                        hull_trend_df = pd.DataFrame(hull_trend_data)
+                        # Only show chart if we have non-zero data
+                        if hull_trend_df["Good %"].sum() > 0:
+                            st.line_chart(hull_trend_df.set_index("Month"), use_container_width=True)
+                        else:
+                            st.info("No hull condition data available for trend analysis")
+                    else:
+                        st.info("No hull condition data available for trend analysis")
+                else:
+                    st.info("Need at least 2 months of hull data for trend analysis")
+                
+                if len(me_cols) >= 2:
+                    st.write("**ME Efficiency Trends (% Good)**")
+                    me_trend_data = []
+                    has_valid_me_data = False
+                    
+                    for col in me_cols:
+                        month = col.replace("ME Efficiency ", "")
+                        total_with_data = len(st.session_state.report_data[st.session_state.report_data[col] != "N/A"])
+                        good_count = len(st.session_state.report_data[st.session_state.report_data[col] == "Good"])
+                        
+                        if total_with_data > 0:
+                            percentage = (good_count / total_with_data * 100)
+                            me_trend_data.append({"Month": month, "Good %": percentage})
+                            has_valid_me_data = True
+                        else:
+                            me_trend_data.append({"Month": month, "Good %": 0})
+                    
+                    if has_valid_me_data and me_trend_data:
+                        me_trend_df = pd.DataFrame(me_trend_data)
+                        # Only show chart if we have non-zero data
+                        if me_trend_df["Good %"].sum() > 0:
+                            st.line_chart(me_trend_df.set_index("Month"), use_container_width=True)
+                        else:
+                            st.info("No ME efficiency data available for trend analysis")
+                    else:
+                        st.info("No ME efficiency data available for trend analysis")
+                else:
+                    st.info("Need at least 2 months of ME efficiency data for trend analysis")report_data[st.session_state.report_data[col] == "Good"])
                         percentage = (good_count / total_with_data * 100) if total_with_data > 0 else 0
                         hull_trend_data.append({"Month": month, "Good %": percentage})
                     
