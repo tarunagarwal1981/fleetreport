@@ -425,7 +425,7 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         df_final[prev_month_hull_col_name] = "N/A"
 
     if f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_month_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
+        df_final[prev_prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
     else:
         df_final[prev_prev_month_hull_col_name] = "N/A"
 
