@@ -539,16 +539,27 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 table.autofit = False # Important for setting widths
                 table.allow_autofit = False
 
-                # Calculate column widths (example: distribute evenly, or set specific for 'Comments')
-                # You might need to adjust these based on your document's page width
-                total_width_inches = 6.5 # Example: 6.5 inches for content area
+                # Calculate column widths
+                # Total available width for content (e.g., 6.5 inches)
+                total_content_width = Inches(6.5)
                 num_cols = len(df.columns)
+                
+                # Define specific width for 'Comments' column
+                comments_col_width = Inches(2.5) # Increased width for comments
+                
+                # Calculate width for other columns
+                remaining_cols = num_cols - 1 # All columns except 'Comments'
+                if 'Comments' not in df.columns: # If comments column is not present, distribute evenly
+                    other_col_width = total_content_width / num_cols
+                else:
+                    other_col_width = (total_content_width - comments_col_width) / (remaining_cols if remaining_cols > 0 else 1)
+
                 col_widths = {}
                 for i, col_name in enumerate(df.columns):
                     if col_name == 'Comments':
-                        col_widths[col_name] = Inches(2.0) # Wider for comments
+                        col_widths[col_name] = comments_col_width
                     else:
-                        col_widths[col_name] = Inches(total_width_inches / (num_cols + 1.5)) # Adjust for comments width
+                        col_widths[col_name] = other_col_width
 
                 for i, column_name in enumerate(df.columns):
                     table.columns[i].width = col_widths[column_name]
@@ -583,8 +594,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         cell = row_cells[i]
                         cell_value = str(value) if pd.notna(value) else "N/A"
                         cell.text = cell_value
-                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
+                        
                         # Enable text wrapping for all cells
                         tc = cell._tc
                         tcPr = tc.get_or_add_tcPr()
@@ -597,7 +607,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         tcPr.append(vAlign)
 
 
-                        # Apply conditional formatting
+                        # Apply conditional formatting and alignment
                         column_name = df.columns[i]
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                             color_hex = get_cell_color(cell_value)
@@ -707,15 +717,22 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             table.autofit = False
             table.allow_autofit = False
 
-            # Calculate column widths (example: distribute evenly, or set specific for 'Comments')
-            total_width_inches = 6.5 # Example: 6.5 inches for content area
+            # Calculate column widths
+            total_content_width = Inches(6.5)
             num_cols = len(df.columns)
+            comments_col_width = Inches(2.5)
+            remaining_cols = num_cols - 1
+            if 'Comments' not in df.columns:
+                other_col_width = total_content_width / num_cols
+            else:
+                other_col_width = (total_content_width - comments_col_width) / (remaining_cols if remaining_cols > 0 else 1)
+
             col_widths = {}
             for i, col_name in enumerate(df.columns):
                 if col_name == 'Comments':
-                    col_widths[col_name] = Inches(2.0) # Wider for comments
+                    col_widths[col_name] = comments_col_width
                 else:
-                    col_widths[col_name] = Inches(total_width_inches / (num_cols + 1.5)) # Adjust for comments width
+                    col_widths[col_name] = other_col_width
 
             for i, column_name in enumerate(df.columns):
                 table.columns[i].width = col_widths[column_name]
@@ -749,8 +766,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     cell = row_cells[i]
                     cell_value = str(value) if pd.notna(value) else "N/A"
                     cell.text = cell_value
-                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-
+                    
                     # Enable text wrapping for all cells
                     tc = cell._tc
                     tcPr = tc.get_or_add_tcPr()
@@ -762,7 +778,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     vAlign.set(qn('w:val'), 'top')
                     tcPr.append(vAlign)
 
-                    # Apply conditional formatting
+                    # Apply conditional formatting and alignment
                     column_name = df.columns[i]
                     if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                         color_hex = get_cell_color(cell_value)
