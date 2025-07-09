@@ -1,4 +1,5 @@
-import streamlit as st
+else:
+                    cell.font = Font(color="000000")import streamlit as st
 import requests
 import pandas as pd
 import json
@@ -412,7 +413,7 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         if pd.isna(value):
             return "N/A", ""
         if value < 160:
-            return "Anomalous data", "SFOC value is unusually low, indicating potential data anomaly."
+            return "Anomalous data", f"SFOC value is {value:.1f} g/kWh, unusually low, indicating potential data anomaly."
         elif value < 180:
             return "Good", ""
         elif 180 <= value <= 190:
@@ -441,13 +442,14 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
     df_final['Comments'] = df_final['temp_comments_list'].apply(lambda x: " ".join(x).strip())
     df_final = df_final.drop(columns=['temp_comments_list'])
 
-    # Define the desired order of columns
+    # Define the desired order of columns (hide Potential Fuel Saving)
     desired_columns_order = ['S. No.', 'Vessel Name']
     for hull_info in hull_dates_info:
         desired_columns_order.append(hull_info['col_name'])
     for me_info in me_dates_info:
         desired_columns_order.append(me_info['col_name'])
-    desired_columns_order.extend(['Potential Fuel Saving (MT/Day)', 'YTD CII', 'Comments'])
+    # desired_columns_order.append('Potential Fuel Saving (MT/Day)')  # Hidden
+    desired_columns_order.extend(['YTD CII', 'Comments'])
 
     # Filter df_final to only include columns that exist and are in the desired order
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
@@ -485,9 +487,9 @@ def style_condition_columns(row):
             elif me_val == "Poor":
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
             elif me_val == "Anomalous data":
-                styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
+                styles[row.index.get_loc(col_name)] = 'background-color: #FF0000; color: white;'  # Red background
 
-    # Style YTD CII column with text color only
+    # Style YTD CII column with text color only (updated A and B colors)
     if 'YTD CII' in row.index:
         cii_val = str(row['YTD CII']).upper() if pd.notna(row['YTD CII']) else "N/A"
         if cii_val == "A":
@@ -530,8 +532,8 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Poor":
                     cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
                 elif cell_value == "Anomalous data":
-                    cell.fill = PatternFill(start_color="E0E0E0", end_color="#f8d7da", fill_type="solid")
-                cell.font = Font(color="000000")
+                    cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+                    cell.font = Font(color="FFFFFF")  # White text on red background
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
                 # Remove CII color coding for Excel to avoid color errors
@@ -573,11 +575,11 @@ def get_cell_color(cell_value):
     return color_map.get(cell_value, None)
 
 def get_cii_text_color(cii_value):
-    """Get text color for CII rating."""
+    """Get text color for CII rating (updated A and B colors)."""
     cii_val = str(cii_value).upper() if pd.notna(cii_value) else "N/A"
     color_map = {
-        "A": (144, 238, 144),  # Light green
-        "B": (0, 100, 0),      # Dark green
+        "A": (0, 100, 0),      # Dark green
+        "B": (144, 238, 144),  # Light green
         "C": (255, 215, 0),    # Yellow
         "D": (255, 140, 0),    # Orange
         "E": (255, 0, 0)       # Red
