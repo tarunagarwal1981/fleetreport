@@ -465,7 +465,7 @@ def style_condition_columns(row):
             elif me_val == "Poor":
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
             elif me_val == "Anomalous data":
-                styles[row.index.get_loc(col_name)] = 'background-color: #e0e0e0; color: black;'
+                styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
 
     return styles
 
@@ -496,7 +496,7 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Poor":
                     cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
                 elif cell_value == "Anomalous data":
-                    cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+                    cell.fill = PatternFill(start_color="E0E0E0", end_color="#f8d7da", fill_type="solid")
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
@@ -533,7 +533,7 @@ def get_cell_color(cell_value):
         "Good": "D4EDDA",
         "Average": "FFF3CD",
         "Poor": "F8D7DA",
-        "Anomalous data": "E0E0E0"
+        "Anomalous data": "#f8d7da"
     }
     return color_map.get(cell_value, None)
 
