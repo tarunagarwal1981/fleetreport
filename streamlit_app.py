@@ -608,23 +608,23 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 page_width = Inches(8.5)  # Standard page width minus margins
                 total_width = Inches(7.5)  # Usable width
                 
-                # Calculate column widths - using raw values to avoid float issues
+                # Calculate column widths - optimized for better distribution
                 col_widths = {}
                 for col_name in df.columns:
                     if col_name == 'S. No.':
-                        col_widths[col_name] = 720000  # 0.5 inches in EMUs
+                        col_widths[col_name] = 432000  # 0.3 inches in EMUs (reduced)
                     elif col_name == 'Vessel Name':
-                        col_widths[col_name] = 2592000  # 1.8 inches in EMUs
+                        col_widths[col_name] = 1728000  # 1.2 inches in EMUs (reduced)
                     elif col_name == 'Comments':
-                        col_widths[col_name] = 4320000  # 3.0 inches in EMUs (extra width)
+                        col_widths[col_name] = 5760000  # 4.0 inches in EMUs (significantly increased)
                     elif col_name == 'Potential Fuel Saving (MT/Day)':
-                        col_widths[col_name] = 1440000  # 1.0 inches in EMUs
+                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs (reduced)
                     elif col_name == 'YTD CII':
-                        col_widths[col_name] = 1008000  # 0.7 inches in EMUs
+                        col_widths[col_name] = 576000  # 0.4 inches in EMUs (reduced)
                     elif 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
-                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
                     else:
-                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
                 
                 # Set column widths using integer values
                 for i, col_name in enumerate(df.columns):
