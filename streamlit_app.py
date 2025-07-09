@@ -182,34 +182,44 @@ def query_report_data(lambda_url, vessel_names, num_months):
         return pd.DataFrame()
 
     today = datetime.now()
-    first_day_current_month = today.replace(day=1)
-
+    
     # Prepare date strings and column names based on num_months
     hull_dates_info = []
     me_dates_info = []
 
     for i in range(num_months):
-        # Hull Condition Dates (last day of the month)
-        target_month_end = first_day_current_month - timedelta(days=1) - timedelta(days=30 * i)
-        target_month_end = target_month_end.replace(day=1) - timedelta(days=1)
-
-        hull_date_str = target_month_end.strftime("%Y-%m-%d")
-        hull_col_name = f"Hull Condition {target_month_end.strftime('%b %y')}"
-        hull_power_loss_col_name = f"Hull Roughness Power Loss % {target_month_end.strftime('%b %y')}"
+        # Calculate the target month for the current iteration
+        # We want the current month and then go back in time
+        target_date = today - timedelta(days=30 * i)
+        
+        # Hull Condition Dates (last day of the target month)
+        # Get the last day of the target month
+        last_day_of_target_month = (target_date.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        hull_date_str = last_day_of_target_month.strftime("%Y-%m-%d")
+        hull_col_name = f"Hull Condition {last_day_of_target_month.strftime('%b %y')}"
+        hull_power_loss_col_name = f"Hull Roughness Power Loss % {last_day_of_target_month.strftime('%b %y')}"
         hull_dates_info.append({
             'date_str': hull_date_str,
             'col_name': hull_col_name,
             'power_loss_col_name': hull_power_loss_col_name,
-            'interval_str': f"INTERVAL '{i+1} month'"
+            'interval_str': f"INTERVAL '{i} month'" # This interval is for ME SFOC, adjusted below
         })
 
         # ME SFOC Dates (average of the entire month)
-        me_col_name = f"ME Efficiency {target_month_end.strftime('%b %y')}"
+        # For ME SFOC, we need the start and end of the target month
+        me_start_of_month = target_date.replace(day=1)
+        me_end_of_month = (me_start_of_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        
+        me_col_name = f"ME Efficiency {me_start_of_month.strftime('%b %y')}"
         me_dates_info.append({
             'col_name': me_col_name,
-            'interval_start_str': f"INTERVAL '{i+1} month'",
-            'interval_end_str': f"INTERVAL '{i} month'"
+            'interval_start_str': f"'{i} month'", # Interval for current month is 0, previous is 1, etc.
+            'interval_end_str': f"'{i-1} month'" if i > 0 else "'0 month'" # For current month, end interval is 0
         })
+    
+    # Reverse the lists so the most recent month appears first in the report
+    hull_dates_info.reverse()
+    me_dates_info.reverse()
 
     # Process vessels in smaller batches with enhanced progress tracking
     batch_size = 10
@@ -259,8 +269,8 @@ SELECT vp.vessel_name, AVG(vps.me_sfoc) AS avg_me_sfoc
 FROM vessel_performance_summary vps
 JOIN vessel_particulars vp ON CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
 WHERE vp.vessel_name IN ({vessel_names_list_str})
-AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - {me_info['interval_start_str']})
-AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - {me_info['interval_end_str']})
+AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL {me_info['interval_start_str']})
+AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - INTERVAL {me_info['interval_end_str']})
 GROUP BY vp.vessel_name
 """, all_me_data_by_month[me_info['col_name']]))
 
@@ -438,7 +448,7 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
 
 # Styling Functions
 def style_condition_columns(row):
-    """Apply styling to condition columns."""
+    """Apply styling to condition columns and CII."""
     styles = [''] * len(row)
 
     # Style hull condition columns
@@ -466,6 +476,24 @@ def style_condition_columns(row):
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
             elif me_val == "Anomalous data":
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
+    
+    # Style YTD CII column (text color only)
+    if 'YTD CII' in row.index:
+        cii_val = str(row['YTD CII']).upper()
+        cii_color = ""
+        if cii_val == "A":
+            cii_color = "color: #28a745;" # Light Green
+        elif cii_val == "B":
+            cii_color = "color: #1e7e34;" # Dark Green
+        elif cii_val == "C":
+            cii_color = "color: #ffc107;" # Yellow
+        elif cii_val == "D":
+            cii_color = "color: #fd7e14;" # Orange
+        elif cii_val == "E":
+            cii_color = "color: #dc3545;" # Red
+        
+        if cii_color:
+            styles[row.index.get_loc('YTD CII')] += cii_color
 
     return styles
 
@@ -500,6 +528,19 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
+                cii_val = str(cell_value).upper()
+                font_color = "000000" # Default black
+                if cii_val == "A":
+                    font_color = "28A745" # Light Green
+                elif cii_val == "B":
+                    font_color = "1E7E34" # Dark Green
+                elif cii_val == "C":
+                    font_color = "FFC107" # Yellow
+                elif cii_val == "D":
+                    font_color = "FD7E14" # Orange
+                elif cii_val == "E":
+                    font_color = "DC3545" # Red
+                cell.font = Font(color=font_color, bold=True)
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
@@ -536,6 +577,21 @@ def get_cell_color(cell_value):
         "Anomalous data": "#f8d7da"
     }
     return color_map.get(cell_value, None)
+
+def get_cii_text_color(cii_rating):
+    """Get text color for CII rating."""
+    cii_rating = str(cii_rating).upper()
+    if cii_rating == "A":
+        return RGBColor(40, 167, 69) # Light Green
+    elif cii_rating == "B":
+        return RGBColor(30, 126, 52) # Dark Green
+    elif cii_rating == "C":
+        return RGBColor(255, 193, 7) # Yellow
+    elif cii_rating == "D":
+        return RGBColor(253, 126, 20) # Orange
+    elif cii_rating == "E":
+        return RGBColor(220, 53, 69) # Red
+    return RGBColor(0, 0, 0) # Default black
 
 def set_cell_border(cell, **kwargs):
     """Set borders for a table cell."""
@@ -679,6 +735,12 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         elif column_name == 'Comments':
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        elif column_name == 'YTD CII':
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.color.rgb = get_cii_text_color(cell_value)
+                                    run.font.bold = True # Make CII bold
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         else:
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         
