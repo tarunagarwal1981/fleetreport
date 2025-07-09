@@ -486,7 +486,11 @@ def set_cell_border(cell, **kwargs):
         if border_name in kwargs:
             border_element = OxmlElement(f"w:{border_name}")
             for attr, value in kwargs[border_name].items():
-                border_element.set(qn(f"w:{attr}"), str(value))
+                # Explicitly cast 'sz' to int to prevent TypeError
+                if attr == "sz":
+                    border_element.set(qn(f"w:{attr}"), str(int(value)))
+                else:
+                    border_element.set(qn(f"w:{attr}"), str(value))
             tcPr.append(border_element)
 
 # Helper function to set cell shading (background color)
