@@ -6,8 +6,7 @@ import io
 from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import PatternFill, Font, Alignment
-from openpyxl.styles.colors import Color
+from openpyxl.styles import PatternFill, Font, Alignment, Color
 import time
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
