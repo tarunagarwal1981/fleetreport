@@ -39,6 +39,9 @@ if 'report_data' not in st.session_state:
 if 'search_query' not in st.session_state:
     st.session_state.search_query = ""
 
+if 'report_months' not in st.session_state:
+    st.session_state.report_months = 2 # Default to 2 months
+
 # Enhanced Lambda Invocation Helper (Backwards Compatible)
 def invoke_lambda_function_url(lambda_url, payload, timeout=60): # Timeout fixed to 60 seconds
     """Invoke Lambda function via its Function URL using HTTP POST with performance tracking."""
@@ -58,7 +61,6 @@ def invoke_lambda_function_url(lambda_url, payload, timeout=60): # Timeout fixed
 
         if response.status_code != 200:
             st.error(f"HTTP error: {response.status_code} {response.reason} for url: {lambda_url}")
-            st.error(f"Response content: {response.text}")
             return None
 
         result = response.json()
@@ -109,46 +111,47 @@ def filter_vessels_client_side(vessels, search_term):
     search_lower = search_term.lower()
     return [v for v in vessels if search_lower in v.lower()]
 
-def query_report_data(lambda_url, vessel_names):
+def query_report_data(lambda_url, vessel_names, num_months):
     """Enhanced version of the original query_report_data function with better progress tracking."""
     if not vessel_names:
         return pd.DataFrame()
 
-    # Calculate dates for previous month, previous-to-previous month, and previous-to-previous-to-previous month
     today = datetime.now()
-
-    # Hull Condition Dates (last day of the month)
     first_day_current_month = today.replace(day=1)
 
-    last_day_previous_month_hull = first_day_current_month - timedelta(days=1)
-    prev_month_hull_str = last_day_previous_month_hull.strftime("%Y-%m-%d")
-    prev_month_hull_col_name = f"Hull Condition {last_day_previous_month_hull.strftime('%b %y')}"
+    # Prepare date strings and column names based on num_months
+    hull_dates_info = []
+    me_dates_info = []
 
-    first_day_previous_month_hull = last_day_previous_month_hull.replace(day=1)
-    last_day_prev_prev_month_hull = first_day_previous_month_hull - timedelta(days=1)
-    prev_prev_month_hull_str = last_day_prev_prev_month_hull.strftime("%Y-%m-%d")
-    prev_prev_month_hull_col_name = f"Hull Condition {last_day_prev_prev_month_hull.strftime('%b %y')}"
+    for i in range(num_months):
+        # Hull Condition Dates (last day of the month)
+        target_month_end = first_day_current_month - timedelta(days=1) - timedelta(days=30 * i) # Approximate
+        target_month_end = target_month_end.replace(day=1) - timedelta(days=1) # Get last day of the i-th previous month
 
-    first_day_prev_prev_month_hull = last_day_prev_prev_month_hull.replace(day=1)
-    last_day_prev_prev_prev_month_hull = first_day_prev_prev_month_hull - timedelta(days=1)
-    prev_prev_prev_month_hull_str = last_day_prev_prev_prev_month_hull.strftime("%Y-%m-%d")
-    prev_prev_prev_month_hull_col_name = f"Hull Condition {last_day_prev_prev_prev_month_hull.strftime('%b %y')}"
+        hull_date_str = target_month_end.strftime("%Y-%m-%d")
+        hull_col_name = f"Hull Condition {target_month_end.strftime('%b %y')}"
+        hull_power_loss_col_name = f"Hull Roughness Power Loss % {target_month_end.strftime('%b %y')}"
+        hull_dates_info.append({
+            'date_str': hull_date_str,
+            'col_name': hull_col_name,
+            'power_loss_col_name': hull_power_loss_col_name,
+            'interval_str': f"INTERVAL '{i+1} month'"
+        })
 
-    # ME SFOC Dates (average of the entire month)
-    prev_month_me_col_name = f"ME Efficiency {last_day_previous_month_hull.strftime('%b %y')}"
-    prev_prev_month_me_col_name = f"ME Efficiency {last_day_prev_prev_month_hull.strftime('%b %y')}"
-    prev_prev_prev_month_me_col_name = f"ME Efficiency {last_day_prev_prev_prev_month_hull.strftime('%b %y')}"
+        # ME SFOC Dates (average of the entire month)
+        me_col_name = f"ME Efficiency {target_month_end.strftime('%b %y')}"
+        me_dates_info.append({
+            'col_name': me_col_name,
+            'interval_start_str': f"INTERVAL '{i+1} month'",
+            'interval_end_str': f"INTERVAL '{i} month'"
+        })
 
     # Process vessels in smaller batches with enhanced progress tracking
     batch_size = 10 # Batch size fixed to 10
     all_fuel_saving_data = []
     all_cii_data = []
-    all_prev_month_hull_data = []
-    all_prev_prev_month_hull_data = []
-    all_prev_prev_prev_month_hull_data = []
-    all_prev_month_me_data = []
-    all_prev_prev_month_me_data = []
-    all_prev_prev_prev_month_me_data = []
+    all_hull_data_by_month = {info['power_loss_col_name']: [] for info in hull_dates_info}
+    all_me_data_by_month = {info['col_name']: [] for info in me_dates_info}
 
     total_batches = (len(vessel_names) + batch_size - 1) // batch_size
 
@@ -168,87 +171,47 @@ def query_report_data(lambda_url, vessel_names):
         quoted_vessel_names = [f"'{name}'" for name in batch_vessels]
         vessel_names_list_str = ", ".join(quoted_vessel_names)
 
-        # Execute all queries for this batch
-        batch_queries = [
-            (f"Hull Roughness {last_day_previous_month_hull.strftime('%b %y')}", f"""
+        batch_queries = []
+
+        # Hull Roughness queries
+        for hull_info in hull_dates_info:
+            batch_queries.append((hull_info['power_loss_col_name'], f"""
 SELECT vessel_name, hull_rough_power_loss_pct_ed
 FROM (
     SELECT vessel_name, hull_rough_power_loss_pct_ed,
            ROW_NUMBER() OVER (PARTITION BY vessel_name, CAST(updated_ts AS DATE) ORDER BY updated_ts DESC) as rn
     FROM hull_performance_six_months_daily
     WHERE vessel_name IN ({vessel_names_list_str})
-    AND CAST(updated_ts AS DATE) = '{prev_month_hull_str}'
+    AND CAST(updated_ts AS DATE) = '{hull_info['date_str']}'
 ) AS subquery
 WHERE rn = 1
-""", all_prev_month_hull_data),
+""", all_hull_data_by_month[hull_info['power_loss_col_name']]))
 
-            (f"Hull Roughness {last_day_prev_prev_month_hull.strftime('%b %y')}", f"""
-SELECT vessel_name, hull_rough_power_loss_pct_ed
-FROM (
-    SELECT vessel_name, hull_rough_power_loss_pct_ed,
-           ROW_NUMBER() OVER (PARTITION BY vessel_name, CAST(updated_ts AS DATE) ORDER BY updated_ts DESC) as rn
-    FROM hull_performance_six_months_daily
-    WHERE vessel_name IN ({vessel_names_list_str})
-    AND CAST(updated_ts AS DATE) = '{prev_prev_month_hull_str}'
-) AS subquery
-WHERE rn = 1
-""", all_prev_prev_month_hull_data),
-
-            (f"Hull Roughness {last_day_prev_prev_prev_month_hull.strftime('%b %y')}", f"""
-SELECT vessel_name, hull_rough_power_loss_pct_ed
-FROM (
-    SELECT vessel_name, hull_rough_power_loss_pct_ed,
-           ROW_NUMBER() OVER (PARTITION BY vessel_name, CAST(updated_ts AS DATE) ORDER BY updated_ts DESC) as rn
-    FROM hull_performance_six_months_daily
-    WHERE vessel_name IN ({vessel_names_list_str})
-    AND CAST(updated_ts AS DATE) = '{prev_prev_prev_month_hull_str}'
-) AS subquery
-WHERE rn = 1
-""", all_prev_prev_prev_month_hull_data),
-
-            (f"ME SFOC {last_day_previous_month_hull.strftime('%b %y')}", f"""
+        # ME SFOC queries
+        for me_info in me_dates_info:
+            batch_queries.append((me_info['col_name'], f"""
 SELECT vp.vessel_name, AVG(vps.me_sfoc) AS avg_me_sfoc
 FROM vessel_performance_summary vps
 JOIN vessel_particulars vp ON CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
 WHERE vp.vessel_name IN ({vessel_names_list_str})
-AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE)
+AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - {me_info['interval_start_str']})
+AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - {me_info['interval_end_str']})
 GROUP BY vp.vessel_name
-""", all_prev_month_me_data),
+""", all_me_data_by_month[me_info['col_name']]))
 
-            (f"ME SFOC {last_day_prev_prev_month_hull.strftime('%b %y')}", f"""
-SELECT vp.vessel_name, AVG(vps.me_sfoc) AS avg_me_sfoc
-FROM vessel_performance_summary vps
-JOIN vessel_particulars vp ON CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
-WHERE vp.vessel_name IN ({vessel_names_list_str})
-AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '2 months')
-AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
-GROUP BY vp.vessel_name
-""", all_prev_prev_month_me_data),
-
-            (f"ME SFOC {last_day_prev_prev_prev_month_hull.strftime('%b %y')}", f"""
-SELECT vp.vessel_name, AVG(vps.me_sfoc) AS avg_me_sfoc
-FROM vessel_performance_summary vps
-JOIN vessel_particulars vp ON CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
-WHERE vp.vessel_name IN ({vessel_names_list_str})
-AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '3 months')
-AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - INTERVAL '2 months')
-GROUP BY vp.vessel_name
-""", all_prev_prev_prev_month_me_data),
-
-            ("Potential Fuel Saving", f"""
+        # Fixed queries (Potential Fuel Saving, YTD CII)
+        batch_queries.append(("Potential Fuel Saving", f"""
 SELECT vessel_name, hull_rough_excess_consumption_mt_ed
 FROM hull_performance_six_months
 WHERE vessel_name IN ({vessel_names_list_str})
-""", all_fuel_saving_data),
+""", all_fuel_saving_data))
 
-            ("YTD CII", f"""
+        batch_queries.append(("YTD CII", f"""
 SELECT vp.vessel_name, cy.cii_rating
 FROM vessel_particulars vp
 JOIN cii_ytd cy ON CAST(vp.vessel_imo AS TEXT) = CAST(cy.vessel_imo AS TEXT)
 WHERE vp.vessel_name IN ({vessel_names_list_str})
-""", all_cii_data)
-        ]
+""", all_cii_data))
 
         # Execute each query
         for query_name, query, data_list in batch_queries:
@@ -261,86 +224,42 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
     progress_bar.empty()
     status_text.empty()
 
-    # Process all collected data (same as original function)
-    # Hull Data processing
-    df_prev_month_hull = pd.DataFrame()
-    if all_prev_month_hull_data:
-        try:
-            df_prev_month_hull = pd.DataFrame(all_prev_month_hull_data)
-            if 'hull_rough_power_loss_pct_ed' in df_prev_month_hull.columns:
-                df_prev_month_hull = df_prev_month_hull.rename(columns={'hull_rough_power_loss_pct_ed': f'Hull Roughness Power Loss % {last_day_previous_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_month_hull[f'Hull Roughness Power Loss % {last_day_previous_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_month_hull = df_prev_month_hull.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous month hull data: {str(e)}")
-            df_prev_month_hull = pd.DataFrame()
+    # Process all collected data
+    df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
 
-    df_prev_prev_month_hull = pd.DataFrame()
-    if all_prev_prev_month_hull_data:
-        try:
-            df_prev_prev_month_hull = pd.DataFrame(all_prev_prev_month_hull_data)
-            if 'hull_rough_power_loss_pct_ed' in df_prev_prev_month_hull.columns:
-                df_prev_prev_month_hull = df_prev_prev_month_hull.rename(columns={'hull_rough_power_loss_pct_ed': f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_prev_month_hull[f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_prev_month_hull = df_prev_prev_month_hull.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous-to-previous month hull data: {str(e)}")
-            df_prev_prev_month_hull = pd.DataFrame()
+    # Hull Data processing and merging
+    for hull_info in hull_dates_info:
+        df_hull = pd.DataFrame()
+        if all_hull_data_by_month[hull_info['power_loss_col_name']]:
+            try:
+                df_hull = pd.DataFrame(all_hull_data_by_month[hull_info['power_loss_col_name']])
+                if 'hull_rough_power_loss_pct_ed' in df_hull.columns:
+                    df_hull = df_hull.rename(columns={'hull_rough_power_loss_pct_ed': hull_info['power_loss_col_name']})
+                else:
+                    df_hull[hull_info['power_loss_col_name']] = pd.NA
+                df_hull = df_hull.rename(columns={'vessel_name': 'Vessel Name'})
+            except Exception as e:
+                st.error(f"Error processing {hull_info['col_name']} data: {str(e)}")
+                df_hull = pd.DataFrame()
+        if not df_hull.empty:
+            df_final = pd.merge(df_final, df_hull, on='Vessel Name', how='left')
 
-    df_prev_prev_prev_month_hull = pd.DataFrame()
-    if all_prev_prev_prev_month_hull_data:
-        try:
-            df_prev_prev_prev_month_hull = pd.DataFrame(all_prev_prev_prev_month_hull_data)
-            if 'hull_rough_power_loss_pct_ed' in df_prev_prev_prev_month_hull.columns:
-                df_prev_prev_prev_month_hull = df_prev_prev_prev_month_hull.rename(columns={'hull_rough_power_loss_pct_ed': f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_prev_prev_month_hull[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_prev_prev_month_hull = df_prev_prev_prev_month_hull.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous-to-previous-to-previous month hull data: {str(e)}")
-            df_prev_prev_prev_month_hull = pd.DataFrame()
-
-    # ME Data processing
-    df_prev_month_me = pd.DataFrame()
-    if all_prev_month_me_data:
-        try:
-            df_prev_month_me = pd.DataFrame(all_prev_month_me_data)
-            if 'avg_me_sfoc' in df_prev_month_me.columns:
-                df_prev_month_me = df_prev_month_me.rename(columns={'avg_me_sfoc': f'ME SFOC {last_day_previous_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_month_me[f'ME SFOC {last_day_previous_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_month_me = df_prev_month_me.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous month ME data: {str(e)}")
-            df_prev_month_me = pd.DataFrame()
-
-    df_prev_prev_month_me = pd.DataFrame()
-    if all_prev_prev_month_me_data:
-        try:
-            df_prev_prev_month_me = pd.DataFrame(all_prev_prev_month_me_data)
-            if 'avg_me_sfoc' in df_prev_prev_month_me.columns:
-                df_prev_prev_month_me = df_prev_prev_month_me.rename(columns={'avg_me_sfoc': f'ME SFOC {last_day_prev_prev_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_prev_month_me[f'ME SFOC {last_day_prev_prev_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_prev_month_me = df_prev_prev_month_me.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous-to-previous month ME data: {str(e)}")
-            df_prev_prev_month_me = pd.DataFrame()
-
-    df_prev_prev_prev_month_me = pd.DataFrame()
-    if all_prev_prev_prev_month_me_data:
-        try:
-            df_prev_prev_prev_month_me = pd.DataFrame(all_prev_prev_prev_month_me_data)
-            if 'avg_me_sfoc' in df_prev_prev_prev_month_me.columns:
-                df_prev_prev_prev_month_me = df_prev_prev_prev_month_me.rename(columns={'avg_me_sfoc': f'ME SFOC {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'})
-            else:
-                df_prev_prev_prev_month_me[f'ME SFOC {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'] = pd.NA
-            df_prev_prev_prev_month_me = df_prev_prev_prev_month_me.rename(columns={'vessel_name': 'Vessel Name'})
-        except Exception as e:
-            st.error(f"Error processing previous-to-previous-to-previous month ME data: {str(e)}")
-            df_prev_prev_prev_month_me = pd.DataFrame()
+    # ME Data processing and merging
+    for me_info in me_dates_info:
+        df_me = pd.DataFrame()
+        if all_me_data_by_month[me_info['col_name']]:
+            try:
+                df_me = pd.DataFrame(all_me_data_by_month[me_info['col_name']])
+                if 'avg_me_sfoc' in df_me.columns:
+                    df_me = df_me.rename(columns={'avg_me_sfoc': me_info['col_name']})
+                else:
+                    df_me[me_info['col_name']] = pd.NA
+                df_me = df_me.rename(columns={'vessel_name': 'Vessel Name'})
+            except Exception as e:
+                st.error(f"Error processing {me_info['col_name']} data: {str(e)}")
+                df_me = pd.DataFrame()
+        if not df_me.empty:
+            df_final = pd.merge(df_final, df_me, on='Vessel Name', how='left')
 
     # Fuel saving and CII data processing
     df_fuel_saving = pd.DataFrame()
@@ -372,29 +291,6 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
             st.error(f"Error processing CII data: {str(e)}")
             df_cii = pd.DataFrame()
 
-    # Merge DataFrames
-    df_final = pd.DataFrame({'Vessel Name': list(vessel_names)})
-
-    # Merge historical hull data
-    if not df_prev_month_hull.empty:
-        df_final = pd.merge(df_final, df_prev_month_hull, on='Vessel Name', how='left')
-
-    if not df_prev_prev_month_hull.empty:
-        df_final = pd.merge(df_final, df_prev_prev_month_hull, on='Vessel Name', how='left')
-
-    if not df_prev_prev_prev_month_hull.empty:
-        df_final = pd.merge(df_final, df_prev_prev_prev_month_hull, on='Vessel Name', how='left')
-
-    # Merge ME data
-    if not df_prev_month_me.empty:
-        df_final = pd.merge(df_final, df_prev_month_me, on='Vessel Name', how='left')
-
-    if not df_prev_prev_month_me.empty:
-        df_final = pd.merge(df_final, df_prev_prev_month_me, on='Vessel Name', how='left')
-
-    if not df_prev_prev_prev_month_me.empty:
-        df_final = pd.merge(df_final, df_prev_prev_prev_month_me, on='Vessel Name', how='left')
-
     # Merge other data
     if not df_fuel_saving.empty:
         df_final = pd.merge(df_final, df_fuel_saving, on='Vessel Name', how='left')
@@ -420,20 +316,11 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
             return "Poor"
 
     # Apply Hull Condition to historical columns
-    if f'Hull Roughness Power Loss % {last_day_previous_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_previous_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
-    else:
-        df_final[prev_month_hull_col_name] = "N/A"
-
-    if f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
-    else:
-        df_final[prev_prev_month_hull_col_name] = "N/A"
-
-    if f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
-    else:
-        df_final[prev_prev_prev_month_hull_col_name] = "N/A"
+    for hull_info in hull_dates_info:
+        if hull_info['power_loss_col_name'] in df_final.columns:
+            df_final[hull_info['col_name']] = df_final[hull_info['power_loss_col_name']].apply(get_hull_condition)
+        else:
+            df_final[hull_info['col_name']] = "N/A"
 
     # ME Efficiency logic
     def get_me_efficiency(value):
@@ -449,38 +336,22 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
             return "Poor"
 
     # Apply ME Efficiency
-    if f'ME SFOC {last_day_previous_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_month_me_col_name] = df_final[f'ME SFOC {last_day_previous_month_hull.strftime("%b %y")}'].apply(get_me_efficiency)
-    else:
-        df_final[prev_month_me_col_name] = "N/A"
-
-    if f'ME SFOC {last_day_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_month_me_col_name] = df_final[f'ME SFOC {last_day_prev_prev_month_hull.strftime("%b %y")}'].apply(get_me_efficiency)
-    else:
-        df_final[prev_prev_month_me_col_name] = "N/A"
-
-    if f'ME SFOC {last_day_prev_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_prev_month_me_col_name] = df_final[f'ME SFOC {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_me_efficiency)
-    else:
-        df_final[prev_prev_prev_month_me_col_name] = "N/A"
+    for me_info in me_dates_info:
+        if me_info['col_name'] in df_final.columns:
+            df_final[me_info['col_name']] = df_final[me_info['col_name']].apply(get_me_efficiency)
+        else:
+            df_final[me_info['col_name']] = "N/A"
 
     # Add empty Comments column
     df_final['Comments'] = ""
 
     # Define the desired order of columns
-    desired_columns_order = [
-        'S. No.',
-        'Vessel Name',
-        prev_month_hull_col_name,
-        prev_prev_month_hull_col_name,
-        prev_prev_prev_month_hull_col_name,
-        prev_month_me_col_name,
-        prev_prev_month_me_col_name,
-        prev_prev_prev_month_me_col_name,
-        'Potential Fuel Saving',
-        'YTD CII',
-        'Comments'
-    ]
+    desired_columns_order = ['S. No.', 'Vessel Name']
+    for hull_info in hull_dates_info:
+        desired_columns_order.append(hull_info['col_name'])
+    for me_info in me_dates_info:
+        desired_columns_order.append(me_info['col_name'])
+    desired_columns_order.extend(['Potential Fuel Saving', 'YTD CII', 'Comments'])
 
     # Filter df_final to only include columns that exist and are in the desired order
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
@@ -640,10 +511,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 date_run.font.italic = True
                 date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                # Add detailed data table heading
-                doc.add_paragraph() # Add a small space after date
-                doc.add_paragraph("Detailed Performance Data", style='Heading 2')
-
                 # Create the main data table
                 table = doc.add_table(rows=1, cols=len(df.columns))
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -780,10 +647,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             date_run.font.italic = True
             date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Add detailed data table heading
-            doc.add_paragraph() # Add a small space after date
-            doc.add_paragraph("Detailed Performance Data", style='Heading 2')
-
             # Create the main data table
             table = doc.add_table(rows=1, cols=len(df.columns))
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -909,6 +772,15 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
         st.error(f"Error type: {type(e).__name__}")
         return None
 
+# Function to reset session state
+def reset_page():
+    st.session_state.selected_vessels = set()
+    st.session_state.report_data = None
+    st.session_state.search_query = ""
+    st.session_state.report_months = 2 # Reset to default
+    st.cache_data.clear() # Clear cache for fresh vessel list
+    st.rerun()
+
 # Main Application
 def main():
     # Lambda Function URL
@@ -917,6 +789,9 @@ def main():
     # Title and header
     st.title("🚢 Enhanced Vessel Performance Report Tool")
     st.markdown("Select vessels and generate a comprehensive performance report with improved processing and UI.")
+
+    # Add a reset button at the top
+    st.button("🔄 Reset All", on_click=reset_page, type="secondary", help="Clear all selections and reset the page.")
 
     # Load vessels
     st.header("1. Select Vessels")
@@ -972,13 +847,23 @@ def main():
         if selected_vessels_list:
             with st.expander(f"📋 Selected Vessels ({len(selected_vessels_list)})", expanded=False):
                 for i, vessel in enumerate(sorted(selected_vessels_list), 1):
-                    st.write(f"{i}. {vessel}")
+                    st.write(f"- {vessel}") # Changed to bullet points for better readability
     else:
         st.error("❌ Failed to load vessels. Please check your connection and try again.")
         selected_vessels_list = []
 
     # Generate report section
     st.header("2. Generate Enhanced Report")
+
+    # Report duration selection
+    st.session_state.report_months = st.radio(
+        "Select Report Duration:",
+        options=[1, 2, 3],
+        format_func=lambda x: f"{x} Month{'s' if x > 1 else ''}",
+        index=1, # Default to 2 months (index 1)
+        horizontal=True,
+        help="Choose to generate report for the previous 1, 2, or 3 months."
+    )
 
     if selected_vessels_list:
         # Generate button with enhanced styling
@@ -987,14 +872,14 @@ def main():
                 try:
                     start_time = time.time()
                     st.session_state.report_data = query_report_data(
-                        LAMBDA_FUNCTION_URL, selected_vessels_list
+                        LAMBDA_FUNCTION_URL, selected_vessels_list, st.session_state.report_months
                     )
 
                     generation_time = time.time() - start_time
 
                     if not st.session_state.report_data.empty:
                         st.success(f"✅ Report generated successfully in {generation_time:.2f} seconds!")
-                        st.balloons()  # Celebration animation
+                        # Removed st.balloons()
                     else:
                         st.warning("⚠️ No data found for the selected vessels.")
 
@@ -1010,7 +895,7 @@ def main():
         st.header("3. 📊 Enhanced Report Results")
 
         # Display styled dataframe with enhanced presentation
-        st.subheader("📋 Detailed Report")
+        st.subheader("📋 Performance Data Table") # Changed heading
         styled_df = st.session_state.report_data.style.apply(
             style_condition_columns, axis=1
         )
