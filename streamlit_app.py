@@ -487,12 +487,8 @@ def set_cell_border(cell, **kwargs):
             border_element = OxmlElement(f"w:{border_name}")
             for attr, value in kwargs[border_name].items():
                 # Ensure 'sz' is an integer representing eighths of a point
-                if attr == "sz":
-                    # Convert points to eighths of a point (1 point = 8 eighths)
-                    # The value passed to sz is already in points, so we multiply by 8
-                    border_element.set(qn(f"w:{attr}"), str(int(value * 8)))
-                else:
-                    border_element.set(qn(f"w:{attr}"), str(value))
+                # The value passed to sz should already be an integer (e.g., 6 for 0.75pt)
+                border_element.set(qn(f"w:{attr}"), str(value))
             tcPr.append(border_element)
 
 # Helper function to set cell shading (background color)
@@ -552,6 +548,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 table.allow_autofit = False
 
                 # Calculate column widths
+                # Total content width for the table (e.g., 6.5 inches)
                 total_content_width = Inches(6.5)
                 
                 # Fixed widths for specific columns
@@ -565,7 +562,8 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 fixed_width_sum = s_no_col_width + vessel_name_col_width + comments_col_width + fuel_saving_col_width + cii_col_width
                 
                 dynamic_cols_count = len(hull_cols_base) + len(me_cols_base)
-                dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else 0.1
+                # Ensure dynamic_col_width is not zero if dynamic_cols_count is zero
+                dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else Inches(0.1)
 
                 col_widths = {}
                 for i, col_name in enumerate(df.columns):
@@ -585,6 +583,9 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 for i, column_name in enumerate(df.columns):
                     table.columns[i].width = col_widths[column_name]
 
+                # Define border size (6 for 0.75pt, which is 6 eighths of a point)
+                border_sz = 6 
+
                 # Populate the first header row (main categories)
                 hdr_cells_0 = table.rows[0].cells
                 
@@ -594,8 +595,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_s_no.merge(table.rows[1].cells[df.columns.get_loc('S. No.')]) # Merge with cell below
                 cell_s_no.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_s_no, "2F75B5")
-                # Convert Pt(6) to integer eighths of a point
-                border_sz = int(Pt(0.75).emu / 1270) # 0.75pt = 6 eighths of a point
                 set_cell_border(cell_s_no, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Vessel Name
@@ -715,14 +714,16 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         # Enable text wrapping for all cells
                         tc = cell._tc
                         tcPr = tc.get_or_add_tcPr()
+                        
+                        # Add w:tcW element to enable auto width and wrapping
                         tcW = OxmlElement("w:tcW")
                         tcW.set(qn("w:type"), "auto") # Auto width
                         tcPr.append(tcW)
+                        
                         # Add vertical alignment to top for all cells
                         vAlign = OxmlElement('w:vAlign')
                         vAlign.set(qn('w:val'), 'top')
                         tcPr.append(vAlign)
-
 
                         # Apply conditional formatting and alignment
                         column_name = df.columns[i]
@@ -850,7 +851,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             fixed_width_sum = s_no_col_width + vessel_name_col_width + comments_col_width + fuel_saving_col_width + cii_col_width
             
             dynamic_cols_count = len(hull_cols_base) + len(me_cols_base)
-            dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else 0.1
+            dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else Inches(0.1)
 
             col_widths = {}
             for i, col_name in enumerate(df.columns):
@@ -870,6 +871,9 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             for i, column_name in enumerate(df.columns):
                 table.columns[i].width = col_widths[column_name]
 
+            # Define border size (6 for 0.75pt, which is 6 eighths of a point)
+            border_sz = 6
+
             # Populate the first header row (main categories)
             hdr_cells_0 = table.rows[0].cells
             
@@ -879,8 +883,6 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_s_no.merge(table.rows[1].cells[df.columns.get_loc('S. No.')]) # Merge with cell below
             cell_s_no.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_s_no, "2F75B5")
-            # Convert Pt(6) to integer eighths of a point
-            border_sz = int(Pt(0.75).emu / 1270) # 0.75pt = 6 eighths of a point
             set_cell_border(cell_s_no, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Vessel Name
@@ -1000,9 +1002,12 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     # Enable text wrapping for all cells
                     tc = cell._tc
                     tcPr = tc.get_or_add_tcPr()
+                    
+                    # Add w:tcW element to enable auto width and wrapping
                     tcW = OxmlElement("w:tcW")
                     tcW.set(qn("w:type"), "auto") # Auto width
                     tcPr.append(tcW)
+                    
                     # Add vertical alignment to top for all cells
                     vAlign = OxmlElement('w:vAlign')
                     vAlign.set(qn('w:val'), 'top')
