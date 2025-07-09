@@ -534,18 +534,24 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                # Apply CII text color coding with Color objects
+                # Apply CII text color coding using direct hex values
                 cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
-                if cii_val == "A":
-                    cell.font = Font(color=Color(rgb="90EE90"), bold=True)  # Light green
-                elif cii_val == "B":
-                    cell.font = Font(color=Color(rgb="006400"), bold=True)  # Dark green
-                elif cii_val == "C":
-                    cell.font = Font(color=Color(rgb="FFD700"), bold=True)  # Yellow
-                elif cii_val == "D":
-                    cell.font = Font(color=Color(rgb="FF8C00"), bold=True)  # Orange
-                elif cii_val == "E":
-                    cell.font = Font(color=Color(rgb="FF0000"), bold=True)  # Red
+                try:
+                    if cii_val == "A":
+                        cell.font = Font(color="90EE90", bold=True)  # Light green
+                    elif cii_val == "B":
+                        cell.font = Font(color="006400", bold=True)  # Dark green
+                    elif cii_val == "C":
+                        cell.font = Font(color="FFD700", bold=True)  # Yellow
+                    elif cii_val == "D":
+                        cell.font = Font(color="FF8C00", bold=True)  # Orange
+                    elif cii_val == "E":
+                        cell.font = Font(color="FF0000", bold=True)  # Red
+                    else:
+                        cell.font = Font(bold=True)
+                except:
+                    # If color fails, just make it bold
+                    cell.font = Font(bold=True)
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
