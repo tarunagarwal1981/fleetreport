@@ -534,18 +534,18 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                # Apply CII text color coding with ARGB format
+                # Apply CII text color coding with Color objects
                 cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
                 if cii_val == "A":
-                    cell.font = Font(color="FF90EE90", bold=True)  # Light green (ARGB)
+                    cell.font = Font(color=Color(rgb="90EE90"), bold=True)  # Light green
                 elif cii_val == "B":
-                    cell.font = Font(color="FF006400", bold=True)  # Dark green (ARGB)
+                    cell.font = Font(color=Color(rgb="006400"), bold=True)  # Dark green
                 elif cii_val == "C":
-                    cell.font = Font(color="FFFFD700", bold=True)  # Yellow (ARGB)
+                    cell.font = Font(color=Color(rgb="FFD700"), bold=True)  # Yellow
                 elif cii_val == "D":
-                    cell.font = Font(color="FFFF8C00", bold=True)  # Orange (ARGB)
+                    cell.font = Font(color=Color(rgb="FF8C00"), bold=True)  # Orange
                 elif cii_val == "E":
-                    cell.font = Font(color="FFFF0000", bold=True)  # Red (ARGB)
+                    cell.font = Font(color=Color(rgb="FF0000"), bold=True)  # Red
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
