@@ -1,5 +1,4 @@
-else:
-                    cell.font = Font(color="000000")import streamlit as st
+import streamlit as st
 import requests
 import pandas as pd
 import json
