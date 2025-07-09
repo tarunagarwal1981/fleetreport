@@ -608,25 +608,25 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 page_width = Inches(8.5)  # Standard page width minus margins
                 total_width = Inches(7.5)  # Usable width
                 
-                # Calculate column widths
+                # Calculate column widths - using raw values to avoid float issues
                 col_widths = {}
                 for col_name in df.columns:
                     if col_name == 'S. No.':
-                        col_widths[col_name] = Inches(0.5)
+                        col_widths[col_name] = 720000  # 0.5 inches in EMUs
                     elif col_name == 'Vessel Name':
-                        col_widths[col_name] = Inches(1.8)
+                        col_widths[col_name] = 2592000  # 1.8 inches in EMUs
                     elif col_name == 'Comments':
-                        col_widths[col_name] = Inches(3.0)  # Extra width for comments
+                        col_widths[col_name] = 4320000  # 3.0 inches in EMUs (extra width)
                     elif col_name == 'Potential Fuel Saving (MT/Day)':
-                        col_widths[col_name] = Inches(1.0)
+                        col_widths[col_name] = 1440000  # 1.0 inches in EMUs
                     elif col_name == 'YTD CII':
-                        col_widths[col_name] = Inches(0.7)
+                        col_widths[col_name] = 1008000  # 0.7 inches in EMUs
                     elif 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
-                        col_widths[col_name] = Inches(0.8)
+                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs
                     else:
-                        col_widths[col_name] = Inches(0.8)
+                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs
                 
-                # Set column widths
+                # Set column widths using integer values
                 for i, col_name in enumerate(df.columns):
                     table.columns[i].width = col_widths[col_name]
                 
