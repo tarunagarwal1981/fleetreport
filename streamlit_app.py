@@ -322,28 +322,35 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         else:
             df_final[hull_info['col_name']] = "N/A"
 
-    # ME Efficiency logic
-    def get_me_efficiency(value):
+    # ME Efficiency logic and comments
+    def get_me_efficiency_and_comment(value):
         if pd.isna(value):
-            return "N/A"
+            return "N/A", ""
         if value < 160:
-            return "Anomalous data"
+            return "Anomalous data", "SFOC value is unusually low, indicating potential data anomaly."
         elif value < 180:
-            return "Good"
+            return "Good", ""
         elif 180 <= value <= 190:
-            return "Average"
+            return "Average", ""
         else:
-            return "Poor"
+            return "Poor", ""
 
-    # Apply ME Efficiency
+    # Apply ME Efficiency and populate comments
+    df_final['Comments'] = "" # Initialize comments column
     for me_info in me_dates_info:
         if me_info['col_name'] in df_final.columns:
-            df_final[me_info['col_name']] = df_final[me_info['col_name']].apply(get_me_efficiency)
+            # Apply the function to get both status and comment
+            df_final[[me_info['col_name'], 'temp_comment']] = df_final[me_info['col_name']].apply(
+                lambda x: pd.Series(get_me_efficiency_and_comment(x))
+            )
+            # Append comments for anomalous data
+            df_final['Comments'] = df_final.apply(
+                lambda row: row['Comments'] + (f"ME Efficiency ({me_info['col_name'].split(' ')[-2:]}): {row['temp_comment']}. " if row['temp_comment'] else ""),
+                axis=1
+            )
+            df_final = df_final.drop(columns=['temp_comment']) # Drop temporary column
         else:
             df_final[me_info['col_name']] = "N/A"
-
-    # Add empty Comments column
-    df_final['Comments'] = ""
 
     # Define the desired order of columns
     desired_columns_order = ['S. No.', 'Vessel Name']
@@ -402,12 +409,15 @@ def create_excel_download_with_styling(df, filename):
 
     # Write headers
     for col_idx, col_name in enumerate(df.columns, 1):
-        ws.cell(row=1, column=col_idx, value=col_name).font = Font(bold=True)
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center') # Wrap text for headers
 
     # Write data and apply styling
     for row_idx, row_data in df.iterrows():
         for col_idx, (col_name, cell_value) in enumerate(row_data.items(), 1):
             cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value)
+            cell.alignment = Alignment(wrap_text=True, vertical='top') # Wrap text for all data cells
 
             if 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
                 if cell_value == "Good":
@@ -419,21 +429,27 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Anomalous data":
                     cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
                 cell.font = Font(color="000000")
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center') # Center for conditions
             elif col_name == 'YTD CII':
-                cell.alignment = Alignment(horizontal='center')
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center') # Center for CII
+            elif col_name == 'Comments':
+                cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top') # Left align for comments
 
-    # Auto-adjust column widths
+    # Auto-adjust column widths and set specific width for Comments
     for col_idx, column in enumerate(df.columns, 1):
-        max_length = 0
         column_letter = get_column_letter(col_idx)
-        for cell in ws[column_letter]:
-            try:
-                if cell.value is not None and len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
-            except:
-                pass
-        adjusted_width = (max_length + 2) * 1.2
-        ws.column_dimensions[column_letter].width = adjusted_width
+        if column == 'Comments':
+            ws.column_dimensions[column_letter].width = 40 # Fixed wider width for comments
+        else:
+            max_length = 0
+            for cell in ws[column_letter]:
+                try:
+                    if cell.value is not None and len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = (max_length + 2) * 1.2
+            ws.column_dimensions[column_letter].width = adjusted_width
 
     wb.save(output)
     return output.getvalue()
@@ -519,6 +535,21 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 table.autofit = False # Important for setting widths
                 table.allow_autofit = False
 
+                # Calculate column widths (example: distribute evenly, or set specific for 'Comments')
+                # You might need to adjust these based on your document's page width
+                total_width_inches = 6.5 # Example: 6.5 inches for content area
+                num_cols = len(df.columns)
+                col_widths = {}
+                for i, col_name in enumerate(df.columns):
+                    if col_name == 'Comments':
+                        col_widths[col_name] = Inches(2.0) # Wider for comments
+                    else:
+                        col_widths[col_name] = Inches(total_width_inches / (num_cols + 1.5)) # Adjust for comments width
+
+                for i, column_name in enumerate(df.columns):
+                    table.columns[i].width = col_widths[column_name]
+
+
                 # Style header row
                 header_cells = table.rows[0].cells
                 for i, column_name in enumerate(df.columns):
@@ -550,12 +581,29 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         cell.text = cell_value
                         cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+                        # Enable text wrapping for all cells
+                        tc = cell._tc
+                        tcPr = tc.get_or_add_tcPr()
+                        tcW = OxmlElement("w:tcW")
+                        tcW.set(qn("w:type"), "auto") # Auto width
+                        tcPr.append(tcW)
+                        # Add vertical alignment to top for all cells
+                        vAlign = OxmlElement('w:vAlign')
+                        vAlign.set(qn('w:val'), 'top')
+                        tcPr.append(vAlign)
+
+
                         # Apply conditional formatting
                         column_name = df.columns[i]
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                             color_hex = get_cell_color(cell_value)
                             if color_hex:
                                 set_cell_shading(cell, color_hex)
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center align for conditions
+                        elif column_name == 'Comments':
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT # Left align for comments
+                        else:
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER # Default center
 
                         # Apply borders to data cells
                         set_cell_border(
@@ -655,6 +703,19 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             table.autofit = False
             table.allow_autofit = False
 
+            # Calculate column widths (example: distribute evenly, or set specific for 'Comments')
+            total_width_inches = 6.5 # Example: 6.5 inches for content area
+            num_cols = len(df.columns)
+            col_widths = {}
+            for i, col_name in enumerate(df.columns):
+                if col_name == 'Comments':
+                    col_widths[col_name] = Inches(2.0) # Wider for comments
+                else:
+                    col_widths[col_name] = Inches(total_width_inches / (num_cols + 1.5)) # Adjust for comments width
+
+            for i, column_name in enumerate(df.columns):
+                table.columns[i].width = col_widths[column_name]
+
             # Style header row
             header_cells = table.rows[0].cells
             for i, column_name in enumerate(df.columns):
@@ -686,12 +747,28 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     cell.text = cell_value
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
+                    # Enable text wrapping for all cells
+                    tc = cell._tc
+                    tcPr = tc.get_or_add_tcPr()
+                    tcW = OxmlElement("w:tcW")
+                    tcW.set(qn("w:type"), "auto") # Auto width
+                    tcPr.append(tcW)
+                    # Add vertical alignment to top for all cells
+                    vAlign = OxmlElement('w:vAlign')
+                    vAlign.set(qn('w:val'), 'top')
+                    tcPr.append(vAlign)
+
                     # Apply conditional formatting
                     column_name = df.columns[i]
                     if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                         color_hex = get_cell_color(cell_value)
                         if color_hex:
                             set_cell_shading(cell, color_hex)
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER # Center align for conditions
+                    elif column_name == 'Comments':
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT # Left align for comments
+                    else:
+                        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER # Default center
 
                     # Apply borders to data cells
                     set_cell_border(
@@ -779,10 +856,16 @@ def reset_page():
     st.session_state.search_query = ""
     st.session_state.report_months = 2 # Reset to default
     st.cache_data.clear() # Clear cache for fresh vessel list
-    st.rerun()
+    # Set a flag to trigger rerun in the main loop
+    st.session_state.trigger_rerun = True
 
 # Main Application
 def main():
+    # Check for rerun flag
+    if 'trigger_rerun' in st.session_state and st.session_state.trigger_rerun:
+        st.session_state.trigger_rerun = False
+        st.rerun()
+
     # Lambda Function URL
     LAMBDA_FUNCTION_URL = "https://yrgj6p4lt5sgv6endohhedmnmq0eftti.lambda-url.ap-south-1.on.aws/"
 
@@ -1131,7 +1214,8 @@ def main():
         **📥 Enhanced Downloads:**
         - Both Excel and CSV download options
         - Timestamped filenames
-        - Styled Excel reports with color coding
+        - Styled Excel reports with color coding and text wrapping
+        - Word reports with improved formatting, text wrapping, and specific comments for anomalous data
         - Better error handling for file generation
 
         ### 📋 How to Use:
@@ -1140,7 +1224,7 @@ def main():
         2. **✅ Select Vessels**: Use checkboxes to select vessels
         3. **🚀 Generate**: Click the generate button for enhanced processing
         4. **📊 Analyze**: Review metrics, charts, and trends in the results
-        5. **📥 Download**: Export your report in Excel or CSV format
+        5. **📥 Download**: Export your report in Excel, CSV, or Word format
 
         ### 📊 Report Columns:
 
@@ -1150,7 +1234,7 @@ def main():
         - 🔴 **Poor**: > 25% power loss (Red)
 
         **⚙️ ME Efficiency** (Multiple months):
-        - ⚪ **Anomalous data**: < 160 SFOC (Gray)
+        - ⚪ **Anomalous data**: < 160 SFOC (Gray) - *A comment will be added for these entries.*
         - 🟢 **Good**: 160-180 SFOC (Green)
         - 🟡 **Average**: 180-190 SFOC (Yellow)
         - 🔴 **Poor**: > 190 SFOC (Red)
@@ -1158,7 +1242,7 @@ def main():
         **📊 Additional Metrics:**
         - ⛽ **Potential Fuel Saving**: Excess consumption (MT/day)
         - 📈 **YTD CII**: Carbon Intensity Indicator rating
-        - 💬 **Comments**: Space for additional notes
+        - 💬 **Comments**: Space for additional notes, including reasons for anomalous ME Efficiency data.
 
         ### 💡 Performance Tips:
 
