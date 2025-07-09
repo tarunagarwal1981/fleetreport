@@ -535,18 +535,18 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                # Apply CII text color coding
+                # Apply CII text color coding with ARGB format
                 cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
                 if cii_val == "A":
-                    cell.font = Font(color="90EE90", bold=True)  # Light green
+                    cell.font = Font(color="FF90EE90", bold=True)  # Light green (ARGB)
                 elif cii_val == "B":
-                    cell.font = Font(color="006400", bold=True)  # Dark green
+                    cell.font = Font(color="FF006400", bold=True)  # Dark green (ARGB)
                 elif cii_val == "C":
-                    cell.font = Font(color="FFD700", bold=True)  # Yellow
+                    cell.font = Font(color="FFFFD700", bold=True)  # Yellow (ARGB)
                 elif cii_val == "D":
-                    cell.font = Font(color="FF8C00", bold=True)  # Orange
+                    cell.font = Font(color="FFFF8C00", bold=True)  # Orange (ARGB)
                 elif cii_val == "E":
-                    cell.font = Font(color="FF0000", bold=True)  # Red
+                    cell.font = Font(color="FFFF0000", bold=True)  # Red (ARGB)
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
