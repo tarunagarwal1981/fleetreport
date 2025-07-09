@@ -335,22 +335,26 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         else:
             return "Poor", ""
 
+    # Initialize a temporary column for comments
+    df_final['temp_comments_list'] = [[] for _ in range(len(df_final))]
+
     # Apply ME Efficiency and populate comments
-    df_final['Comments'] = "" # Initialize comments column
     for me_info in me_dates_info:
         if me_info['col_name'] in df_final.columns:
             # Apply the function to get both status and comment
-            df_final[[me_info['col_name'], 'temp_comment']] = df_final[me_info['col_name']].apply(
+            df_final[[me_info['col_name'], 'current_me_comment']] = df_final[me_info['col_name']].apply(
                 lambda x: pd.Series(get_me_efficiency_and_comment(x))
             )
-            # Append comments for anomalous data
-            df_final['Comments'] = df_final.apply(
-                lambda row: row['Comments'] + (f"ME Efficiency ({me_info['col_name'].split(' ')[-2:]}): {row['temp_comment']}. " if row['temp_comment'] else ""),
+            # Append comments for anomalous data to the temporary list
+            df_final['temp_comments_list'] = df_final.apply(
+                lambda row: row['temp_comments_list'] + [f"ME Efficiency ({me_info['col_name'].split(' ')[-2:]}): {row['current_me_comment']}"] if row['current_me_comment'] else row['temp_comments_list'],
                 axis=1
             )
-            df_final = df_final.drop(columns=['temp_comment']) # Drop temporary column
-        else:
-            df_final[me_info['col_name']] = "N/A"
+            df_final = df_final.drop(columns=['current_me_comment']) # Drop temporary column
+
+    # Join all collected comments into the final 'Comments' column
+    df_final['Comments'] = df_final['temp_comments_list'].apply(lambda x: " ".join(x).strip())
+    df_final = df_final.drop(columns=['temp_comments_list']) # Drop the temporary list column
 
     # Define the desired order of columns
     desired_columns_order = ['S. No.', 'Vessel Name']
