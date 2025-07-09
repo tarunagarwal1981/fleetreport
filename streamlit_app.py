@@ -267,12 +267,12 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         try:
             df_fuel_saving = pd.DataFrame(all_fuel_saving_data)
             if 'hull_rough_excess_consumption_mt_ed' in df_fuel_saving.columns:
-                df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving'})
-                df_fuel_saving['Potential Fuel Saving'] = df_fuel_saving['Potential Fuel Saving'].apply(
+                df_fuel_saving = df_fuel_saving.rename(columns={'hull_rough_excess_consumption_mt_ed': 'Potential Fuel Saving (MT/Day)'})
+                df_fuel_saving['Potential Fuel Saving (MT/Day)'] = df_fuel_saving['Potential Fuel Saving (MT/Day)'].apply(
                     lambda x: 4.9 if pd.notna(x) and x > 5 else (0.0 if pd.notna(x) and x < 0 else x)
-                )
+                ).round(2) # Round to 2 decimal places
             else:
-                df_fuel_saving['Potential Fuel Saving'] = pd.NA
+                df_fuel_saving['Potential Fuel Saving (MT/Day)'] = pd.NA
             df_fuel_saving = df_fuel_saving.rename(columns={'vessel_name': 'Vessel Name'})
         except Exception as e:
             st.error(f"Error processing fuel saving data: {str(e)}")
@@ -362,7 +362,7 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         desired_columns_order.append(hull_info['col_name'])
     for me_info in me_dates_info:
         desired_columns_order.append(me_info['col_name'])
-    desired_columns_order.extend(['Potential Fuel Saving', 'YTD CII', 'Comments'])
+    desired_columns_order.extend(['Potential Fuel Saving (MT/Day)', 'YTD CII', 'Comments'])
 
     # Filter df_final to only include columns that exist and are in the desired order
     existing_and_ordered_columns = [col for col in desired_columns_order if col in df_final.columns]
@@ -438,12 +438,16 @@ def create_excel_download_with_styling(df, filename):
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center') # Center for CII
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top') # Left align for comments
+            elif col_name == 'Potential Fuel Saving (MT/Day)':
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center') # Center for fuel saving
 
-    # Auto-adjust column widths and set specific width for Comments
+    # Auto-adjust column widths and set specific width for Comments and S. No.
     for col_idx, column in enumerate(df.columns, 1):
         column_letter = get_column_letter(col_idx)
         if column == 'Comments':
             ws.column_dimensions[column_letter].width = 40 # Fixed wider width for comments
+        elif column == 'S. No.':
+            ws.column_dimensions[column_letter].width = 8 # Smaller fixed width for S. No.
         else:
             max_length = 0
             for cell in ws[column_letter]:
@@ -500,7 +504,7 @@ def set_cell_shading(cell, color_hex):
     shd.set(qn("w:fill"), color_hex) # The fill color
     tcPr.append(shd)
 
-def create_advanced_word_report(df, template_path="Fleet Performance Template.docx"):
+def create_advanced_word_report(df, template_path="Fleet Performance Template.docx", num_months=2):
     """Create an advanced Word report with better formatting and multiple sections."""
     try:
         if not os.path.exists(template_path):
@@ -531,61 +535,171 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 date_run.font.italic = True
                 date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-                # Create the main data table
-                table = doc.add_table(rows=1, cols=len(df.columns))
-                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                # Determine column groups for multi-level header
+                hull_cols_base = [col for col in df.columns if 'Hull Condition' in col]
+                me_cols_base = [col for col in df.columns if 'ME Efficiency' in col]
 
-                # Set table borders (grid lines)
-                table.autofit = False # Important for setting widths
+                # Create the main data table with two header rows
+                table = doc.add_table(rows=2, cols=len(df.columns))
+                table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                table.autofit = False
                 table.allow_autofit = False
 
                 # Calculate column widths
-                # Total available width for content (e.g., 6.5 inches)
                 total_content_width = Inches(6.5)
-                num_cols = len(df.columns)
                 
-                # Define specific width for 'Comments' column
+                # Fixed widths for specific columns
+                s_no_col_width = Inches(0.5) # Smaller width for S. No.
+                vessel_name_col_width = Inches(1.2)
                 comments_col_width = Inches(2.5) # Increased width for comments
+                fuel_saving_col_width = Inches(1.0)
+                cii_col_width = Inches(0.7)
+
+                # Calculate remaining width for dynamic columns
+                fixed_width_sum = s_no_col_width + vessel_name_col_width + comments_col_width + fuel_saving_col_width + cii_col_width
                 
-                # Calculate width for other columns
-                remaining_cols = num_cols - 1 # All columns except 'Comments'
-                if 'Comments' not in df.columns: # If comments column is not present, distribute evenly
-                    other_col_width = total_content_width / num_cols
-                else:
-                    other_col_width = (total_content_width - comments_col_width) / (remaining_cols if remaining_cols > 0 else 1)
+                dynamic_cols_count = len(hull_cols_base) + len(me_cols_base)
+                dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else 0.1
 
                 col_widths = {}
                 for i, col_name in enumerate(df.columns):
-                    if col_name == 'Comments':
+                    if col_name == 'S. No.':
+                        col_widths[col_name] = s_no_col_width
+                    elif col_name == 'Vessel Name':
+                        col_widths[col_name] = vessel_name_col_width
+                    elif col_name == 'Comments':
                         col_widths[col_name] = comments_col_width
+                    elif col_name == 'Potential Fuel Saving (MT/Day)':
+                        col_widths[col_name] = fuel_saving_col_width
+                    elif col_name == 'YTD CII':
+                        col_widths[col_name] = cii_col_width
                     else:
-                        col_widths[col_name] = other_col_width
+                        col_widths[col_name] = dynamic_col_width
 
                 for i, column_name in enumerate(df.columns):
                     table.columns[i].width = col_widths[column_name]
 
+                # Populate the first header row (main categories)
+                hdr_cells_0 = table.rows[0].cells
+                current_col_idx = 0
 
-                # Style header row
-                header_cells = table.rows[0].cells
-                for i, column_name in enumerate(df.columns):
-                    cell = header_cells[i]
-                    cell.text = str(column_name)
-                    for run in cell.paragraphs[0].runs:
-                        run.font.bold = True
-                        run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+                # S. No.
+                cell = hdr_cells_0[current_col_idx]
+                cell.text = "S. No."
+                cell.merge(hdr_cells_0[current_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                current_col_idx += 1
+
+                # Vessel Name
+                cell = hdr_cells_0[current_col_idx]
+                cell.text = "Vessel Name"
+                cell.merge(hdr_cells_0[current_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                current_col_idx += 1
+
+                # Hull Condition Group
+                if hull_cols_base:
+                    first_hull_col_idx = df.columns.get_loc(hull_cols_base[0])
+                    last_hull_col_idx = df.columns.get_loc(hull_cols_base[-1])
+                    
+                    # Merge cells for "Hull Condition"
+                    merged_cell_hull = hdr_cells_0[first_hull_col_idx]
+                    merged_cell_hull.merge(hdr_cells_0[last_hull_col_idx])
+                    merged_cell_hull.text = "Hull Condition"
+                    merged_cell_hull.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    set_cell_shading(merged_cell_hull, "2F75B5")
+                    set_cell_border(merged_cell_hull, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                
+                # ME Efficiency Group
+                if me_cols_base:
+                    first_me_col_idx = df.columns.get_loc(me_cols_base[0])
+                    last_me_col_idx = df.columns.get_loc(me_cols_base[-1])
+
+                    # Merge cells for "ME Efficiency"
+                    merged_cell_me = hdr_cells_0[first_me_col_idx]
+                    merged_cell_me.merge(hdr_cells_0[last_me_col_idx])
+                    merged_cell_me.text = "ME Efficiency"
+                    merged_cell_me.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    set_cell_shading(merged_cell_me, "2F75B5")
+                    set_cell_border(merged_cell_me, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+                # Potential Fuel Saving (MT/Day)
+                fuel_saving_col_idx = df.columns.get_loc('Potential Fuel Saving (MT/Day)')
+                cell = hdr_cells_0[fuel_saving_col_idx]
+                cell.text = "Potential Fuel Saving (MT/Day)"
+                cell.merge(hdr_cells_0[fuel_saving_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+                # YTD CII
+                cii_col_idx = df.columns.get_loc('YTD CII')
+                cell = hdr_cells_0[cii_col_idx]
+                cell.text = "YTD CII"
+                cell.merge(hdr_cells_0[cii_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+                # Comments
+                comments_col_idx = df.columns.get_loc('Comments')
+                cell = hdr_cells_0[comments_col_idx]
+                cell.text = "Comments"
+                cell.merge(hdr_cells_0[comments_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+
+                # Populate the second header row (sub-categories for Hull and ME)
+                hdr_cells_1 = table.rows[1].cells
+                
+                # Skip S. No., Vessel Name, Potential Fuel Saving, YTD CII, Comments as they are merged
+                # These cells will be automatically merged from the first row.
+                # We only need to populate the sub-headers for Hull and ME.
+
+                # Hull Condition sub-headers
+                for i, col_name in enumerate(hull_cols_base):
+                    cell = hdr_cells_1[df.columns.get_loc(col_name)]
+                    month_info = col_name.replace("Hull Condition ", "")
+                    if i == 0:
+                        cell.text = "Current Month"
+                    elif i == 1:
+                        cell.text = "Previous Month"
+                    elif i == 2:
+                        cell.text = "2 Months Ago"
+                    else:
+                        cell.text = month_info # Fallback
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    set_cell_shading(cell, "2F75B5")
+                    set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
 
-                    # Set header background to dark blue using the new helper
-                    set_cell_shading(cell, "2F75B5") # Dark blue
+                # ME Efficiency sub-headers
+                for i, col_name in enumerate(me_cols_base):
+                    cell = hdr_cells_1[df.columns.get_loc(col_name)]
+                    month_info = col_name.replace("ME Efficiency ", "")
+                    if i == 0:
+                        cell.text = "Current Month"
+                    elif i == 1:
+                        cell.text = "Previous Month"
+                    elif i == 2:
+                        cell.text = "2 Months Ago"
+                    else:
+                        cell.text = month_info # Fallback
+                    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    set_cell_shading(cell, "2F75B5")
+                    set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
 
-                    # Apply borders to header cells
-                    set_cell_border(
-                        cell,
-                        top={"sz": 6, "val": "single", "color": "000000"},
-                        left={"sz": 6, "val": "single", "color": "000000"},
-                        bottom={"sz": 6, "val": "single", "color": "000000"},
-                        right={"sz": 6, "val": "single", "color": "000000"},
-                    )
+                # Set font color for all header cells to white
+                for row_idx in range(2):
+                    for cell in table.rows[row_idx].cells:
+                        for run in cell.paragraphs[0].runs:
+                            run.font.color.rgb = RGBColor(255, 255, 255)
+
 
                 # Add data rows with formatting
                 for _, row in df.iterrows():
@@ -709,55 +823,171 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             date_run.font.italic = True
             date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-            # Create the main data table
-            table = doc.add_table(rows=1, cols=len(df.columns))
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+            # Determine column groups for multi-level header
+            hull_cols_base = [col for col in df.columns if 'Hull Condition' in col]
+            me_cols_base = [col for col in df.columns if 'ME Efficiency' in col]
 
-            # Set table borders (grid lines)
+            # Create the main data table with two header rows
+            table = doc.add_table(rows=2, cols=len(df.columns))
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
             table.autofit = False
             table.allow_autofit = False
 
             # Calculate column widths
             total_content_width = Inches(6.5)
-            num_cols = len(df.columns)
-            comments_col_width = Inches(2.5)
-            remaining_cols = num_cols - 1
-            if 'Comments' not in df.columns:
-                other_col_width = total_content_width / num_cols
-            else:
-                other_col_width = (total_content_width - comments_col_width) / (remaining_cols if remaining_cols > 0 else 1)
+            
+            # Fixed widths for specific columns
+            s_no_col_width = Inches(0.5) # Smaller width for S. No.
+            vessel_name_col_width = Inches(1.2)
+            comments_col_width = Inches(2.5) # Increased width for comments
+            fuel_saving_col_width = Inches(1.0)
+            cii_col_width = Inches(0.7)
+
+            # Calculate remaining width for dynamic columns
+            fixed_width_sum = s_no_col_width + vessel_name_col_width + comments_col_width + fuel_saving_col_width + cii_col_width
+            
+            dynamic_cols_count = len(hull_cols_base) + len(me_cols_base)
+            dynamic_col_width = (total_content_width - fixed_width_sum) / dynamic_cols_count if dynamic_cols_count > 0 else 0.1
 
             col_widths = {}
             for i, col_name in enumerate(df.columns):
-                if col_name == 'Comments':
+                if col_name == 'S. No.':
+                    col_widths[col_name] = s_no_col_width
+                elif col_name == 'Vessel Name':
+                    col_widths[col_name] = vessel_name_col_width
+                elif col_name == 'Comments':
                     col_widths[col_name] = comments_col_width
+                elif col_name == 'Potential Fuel Saving (MT/Day)':
+                    col_widths[col_name] = fuel_saving_col_width
+                elif col_name == 'YTD CII':
+                    col_widths[col_name] = cii_col_width
                 else:
-                    col_widths[col_name] = other_col_width
+                    col_widths[col_name] = dynamic_col_width
 
             for i, column_name in enumerate(df.columns):
                 table.columns[i].width = col_widths[column_name]
 
-            # Style header row
-            header_cells = table.rows[0].cells
-            for i, column_name in enumerate(df.columns):
-                cell = header_cells[i]
-                cell.text = str(column_name)
-                for run in cell.paragraphs[0].runs:
-                    run.font.bold = True
-                    run.font.color.rgb = RGBColor(255, 255, 255)  # White text
+            # Populate the first header row (main categories)
+            hdr_cells_0 = table.rows[0].cells
+            current_col_idx = 0
+
+            # S. No.
+            cell = hdr_cells_0[current_col_idx]
+            cell.text = "S. No."
+            cell.merge(hdr_cells_0[current_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_cell_shading(cell, "2F75B5")
+            set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            current_col_idx += 1
+
+            # Vessel Name
+            cell = hdr_cells_0[current_col_idx]
+            cell.text = "Vessel Name"
+            cell.merge(hdr_cells_0[current_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_cell_shading(cell, "2F75B5")
+            set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            current_col_idx += 1
+
+            # Hull Condition Group
+            if hull_cols_base:
+                first_hull_col_idx = df.columns.get_loc(hull_cols_base[0])
+                last_hull_col_idx = df.columns.get_loc(hull_cols_base[-1])
+                
+                # Merge cells for "Hull Condition"
+                merged_cell_hull = hdr_cells_0[first_hull_col_idx]
+                merged_cell_hull.merge(hdr_cells_0[last_hull_col_idx])
+                merged_cell_hull.text = "Hull Condition"
+                merged_cell_hull.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(merged_cell_hull, "2F75B5")
+                set_cell_border(merged_cell_hull, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            
+            # ME Efficiency Group
+            if me_cols_base:
+                first_me_col_idx = df.columns.get_loc(me_cols_base[0])
+                last_me_col_idx = df.columns.get_loc(me_cols_base[-1])
+
+                # Merge cells for "ME Efficiency"
+                merged_cell_me = hdr_cells_0[first_me_col_idx]
+                merged_cell_me.merge(hdr_cells_0[last_me_col_idx])
+                merged_cell_me.text = "ME Efficiency"
+                merged_cell_me.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(merged_cell_me, "2F75B5")
+                set_cell_border(merged_cell_me, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+            # Potential Fuel Saving (MT/Day)
+            fuel_saving_col_idx = df.columns.get_loc('Potential Fuel Saving (MT/Day)')
+            cell = hdr_cells_0[fuel_saving_col_idx]
+            cell.text = "Potential Fuel Saving (MT/Day)"
+            cell.merge(hdr_cells_0[fuel_saving_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_cell_shading(cell, "2F75B5")
+            set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+            # YTD CII
+            cii_col_idx = df.columns.get_loc('YTD CII')
+            cell = hdr_cells_0[cii_col_idx]
+            cell.text = "YTD CII"
+            cell.merge(hdr_cells_0[cii_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_cell_shading(cell, "2F75B5")
+            set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+            # Comments
+            comments_col_idx = df.columns.get_loc('Comments')
+            cell = hdr_cells_0[comments_col_idx]
+            cell.text = "Comments"
+            cell.merge(hdr_cells_0[comments_col_idx + len(df.columns) - 1]) # Merge with itself to span 2 rows
+            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            set_cell_shading(cell, "2F75B5")
+            set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+
+
+            # Populate the second header row (sub-categories for Hull and ME)
+            hdr_cells_1 = table.rows[1].cells
+            
+            # Skip S. No., Vessel Name, Potential Fuel Saving, YTD CII, Comments as they are merged
+            # These cells will be automatically merged from the first row.
+            # We only need to populate the sub-headers for Hull and ME.
+
+            # Hull Condition sub-headers
+            for i, col_name in enumerate(hull_cols_base):
+                cell = hdr_cells_1[df.columns.get_loc(col_name)]
+                month_info = col_name.replace("Hull Condition ", "")
+                if i == 0:
+                    cell.text = "Current Month"
+                elif i == 1:
+                    cell.text = "Previous Month"
+                elif i == 2:
+                    cell.text = "2 Months Ago"
+                else:
+                    cell.text = month_info # Fallback
                 cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
 
-                # Set header background to dark blue using the new helper
-                set_cell_shading(cell, "2F75B5") # Dark blue
+            # ME Efficiency sub-headers
+            for i, col_name in enumerate(me_cols_base):
+                cell = hdr_cells_1[df.columns.get_loc(col_name)]
+                month_info = col_name.replace("ME Efficiency ", "")
+                if i == 0:
+                    cell.text = "Current Month"
+                elif i == 1:
+                    cell.text = "Previous Month"
+                elif i == 2:
+                    cell.text = "2 Months Ago"
+                else:
+                    cell.text = month_info # Fallback
+                cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_cell_shading(cell, "2F75B5")
+                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
 
-                # Apply borders to header cells
-                set_cell_border(
-                    cell,
-                    top={"sz": 6, "val": "single", "color": "000000"},
-                    left={"sz": 6, "val": "single", "color": "000000"},
-                    bottom={"sz": 6, "val": "single", "color": "000000"},
-                    right={"sz": 6, "val": "single", "color": "000000"},
-                )
+            # Set font color for all header cells to white
+            for row_idx in range(2):
+                for cell in table.rows[row_idx].cells:
+                    for run in cell.paragraphs[0].runs:
+                        run.font.color.rgb = RGBColor(255, 255, 255)
+
 
             # Add data rows with formatting
             for _, row in df.iterrows():
@@ -1045,7 +1275,7 @@ def main():
                 # Check if template exists
                 template_path = "Fleet Performance Template.docx"
                 if os.path.exists(template_path):
-                    word_data = create_advanced_word_report(st.session_state.report_data, template_path)
+                    word_data = create_advanced_word_report(st.session_state.report_data, template_path, st.session_state.report_months)
                     if word_data:
                         st.download_button(
                             label="📝 Download Word Report",
@@ -1260,23 +1490,6 @@ def main():
         - 🔴 **Poor**: > 190 SFOC (Red)
 
         **📊 Additional Metrics:**
-        - ⛽ **Potential Fuel Saving**: Excess consumption (MT/day)
+        - ⛽ **Potential Fuel Saving (MT/Day)**: Excess consumption (MT/day)
         - 📈 **YTD CII**: Carbon Intensity Indicator rating
-        - 💬 **Comments**: Space for additional notes, including reasons for anomalous ME Efficiency data.
-
-        ### 💡 Performance Tips:
-
-        - Clear cache occasionally to ensure fresh data
-        - Use search to narrow down vessels before bulk selection
-        """)
-
-    # Enhanced footer
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("*Enhanced with improved UI & analytics*")
-    with col2:
-        st.markdown("*Built with Streamlit 🎈 and Python*")
-
-if __name__ == "__main__":
-    main()
+        - 💬 **Comments
