@@ -39,7 +39,7 @@ st.markdown("""
         color: white;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    
+  
     .section-header {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         padding: 1rem;
@@ -48,7 +48,7 @@ st.markdown("""
         color: white;
         font-weight: bold;
     }
-    
+  
     .metric-card {
         background: white;
         padding: 1rem;
@@ -57,7 +57,7 @@ st.markdown("""
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         margin: 0.5rem 0;
     }
-    
+  
     .stButton > button {
         background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -67,12 +67,12 @@ st.markdown("""
         font-weight: bold;
         transition: all 0.3s ease;
     }
-    
+  
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
-    
+  
     .success-box {
         background: linear-gradient(90deg, #56ab2f 0%, #a8e6cf 100%);
         padding: 1rem;
@@ -80,7 +80,7 @@ st.markdown("""
         color: white;
         margin: 1rem 0;
     }
-    
+  
     .info-box {
         background: linear-gradient(90deg, #3498db 0%, #85c1e9 100%);
         padding: 1rem;
@@ -153,9 +153,9 @@ def invoke_lambda_function_url(lambda_url, payload, timeout=60):
 def fetch_all_vessels(lambda_url):
     """Fetch vessel names from Lambda function with a limit of 1200."""
     query = "SELECT vessel_name FROM vessel_particulars ORDER BY vessel_name LIMIT 1200"
-    
+  
     result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
-    
+  
     if result:
         extracted_vessel_names = []
         for item in result:
@@ -165,61 +165,72 @@ def fetch_all_vessels(lambda_url):
                 extracted_vessel_names.append(item)
         extracted_vessel_names.sort()
         return extracted_vessel_names
-    
+  
     return []
 
 def filter_vessels_client_side(vessels, search_term):
     """Filter vessels on client side for better responsiveness."""
     if not search_term:
         return vessels
-    
+  
     search_lower = search_term.lower()
     return [v for v in vessels if search_lower in v.lower()]
 
 def query_report_data(lambda_url, vessel_names, num_months):
-    """Enhanced version of the original query_report_data function with better progress tracking."""
+    """Enhanced version of the original query_report_data function with better progress tracking and fixed date logic."""
     if not vessel_names:
         return pd.DataFrame()
 
     today = datetime.now()
-    
+    # Get the first day of the current month
+    first_day_current_month = today.replace(day=1)
+
     # Prepare date strings and column names based on num_months
     hull_dates_info = []
     me_dates_info = []
 
     for i in range(num_months):
-        # Calculate the target month for the current iteration
-        # We want the current month and then go back in time
-        target_date = today - timedelta(days=30 * i)
+        # Calculate the target month (going backwards from current month)
+        # For i=0: current month - 1 (previous month)
+        # For i=1: current month - 2 (two months ago)
+        months_back = i + 1
+        
+        # Get the first day of the target month
+        if first_day_current_month.month <= months_back:
+            # Need to go back to previous year
+            target_year = first_day_current_month.year - 1
+            target_month = 12 - (months_back - first_day_current_month.month)
+        else:
+            target_year = first_day_current_month.year
+            target_month = first_day_current_month.month - months_back
+        
+        target_month_first_day = datetime(target_year, target_month, 1)
         
         # Hull Condition Dates (last day of the target month)
-        # Get the last day of the target month
-        last_day_of_target_month = (target_date.replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-        hull_date_str = last_day_of_target_month.strftime("%Y-%m-%d")
-        hull_col_name = f"Hull Condition {last_day_of_target_month.strftime('%b %y')}"
-        hull_power_loss_col_name = f"Hull Roughness Power Loss % {last_day_of_target_month.strftime('%b %y')}"
+        if target_month == 12:
+            next_month_first = datetime(target_year + 1, 1, 1)
+        else:
+            next_month_first = datetime(target_year, target_month + 1, 1)
+        
+        target_month_last_day = next_month_first - timedelta(days=1)
+
+        hull_date_str = target_month_last_day.strftime("%Y-%m-%d")
+        hull_col_name = f"Hull Condition {target_month_last_day.strftime('%b %y')}"
+        hull_power_loss_col_name = f"Hull Roughness Power Loss % {target_month_last_day.strftime('%b %y')}"
         hull_dates_info.append({
             'date_str': hull_date_str,
             'col_name': hull_col_name,
             'power_loss_col_name': hull_power_loss_col_name,
-            'interval_str': f"INTERVAL '{i} month'" # This interval is for ME SFOC, adjusted below
+            'months_back': months_back
         })
 
-        # ME SFOC Dates (average of the entire month)
-        # For ME SFOC, we need the start and end of the target month
-        me_start_of_month = target_date.replace(day=1)
-        me_end_of_month = (me_start_of_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-        
-        me_col_name = f"ME Efficiency {me_start_of_month.strftime('%b %y')}"
+        # ME SFOC Dates (average of the entire target month)
+        me_col_name = f"ME Efficiency {target_month_last_day.strftime('%b %y')}"
         me_dates_info.append({
             'col_name': me_col_name,
-            'interval_start_str': f"'{i} month'", # Interval for current month is 0, previous is 1, etc.
-            'interval_end_str': f"'{i-1} month'" if i > 0 else "'0 month'" # For current month, end interval is 0
+            'months_back': months_back,
+            'target_month_first': target_month_first_day
         })
-    
-    # Reverse the lists so the most recent month appears first in the report
-    hull_dates_info.reverse()
-    me_dates_info.reverse()
 
     # Process vessels in smaller batches with enhanced progress tracking
     batch_size = 10
@@ -262,15 +273,15 @@ FROM (
 WHERE rn = 1
 """, all_hull_data_by_month[hull_info['power_loss_col_name']]))
 
-        # ME SFOC queries
+        # ME SFOC queries with corrected date logic
         for me_info in me_dates_info:
             batch_queries.append((me_info['col_name'], f"""
 SELECT vp.vessel_name, AVG(vps.me_sfoc) AS avg_me_sfoc
 FROM vessel_performance_summary vps
 JOIN vessel_particulars vp ON CAST(vps.vessel_imo AS TEXT) = CAST(vp.vessel_imo AS TEXT)
 WHERE vp.vessel_name IN ({vessel_names_list_str})
-AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL {me_info['interval_start_str']})
-AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - INTERVAL {me_info['interval_end_str']})
+AND vps.reportdate >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{me_info['months_back']} month')
+AND vps.reportdate < DATE_TRUNC('month', CURRENT_DATE - INTERVAL '{me_info['months_back'] - 1} month')
 GROUP BY vp.vessel_name
 """, all_me_data_by_month[me_info['col_name']]))
 
@@ -446,9 +457,9 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
     st.success("✅ Enhanced report data retrieved and processed successfully!")
     return df_final
 
-# Styling Functions
+# Enhanced styling function with CII color coding
 def style_condition_columns(row):
-    """Apply styling to condition columns and CII."""
+    """Apply styling to condition columns including CII rating text color."""
     styles = [''] * len(row)
 
     # Style hull condition columns
@@ -476,29 +487,25 @@ def style_condition_columns(row):
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
             elif me_val == "Anomalous data":
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
-    
-    # Style YTD CII column (text color only)
+
+    # Style YTD CII column with text color only
     if 'YTD CII' in row.index:
-        cii_val = str(row['YTD CII']).upper()
-        cii_color = ""
+        cii_val = str(row['YTD CII']).upper() if pd.notna(row['YTD CII']) else "N/A"
         if cii_val == "A":
-            cii_color = "color: #28a745;" # Light Green
+            styles[row.index.get_loc('YTD CII')] = 'color: #90EE90; font-weight: bold;'  # Light green
         elif cii_val == "B":
-            cii_color = "color: #1e7e34;" # Dark Green
+            styles[row.index.get_loc('YTD CII')] = 'color: #006400; font-weight: bold;'  # Dark green
         elif cii_val == "C":
-            cii_color = "color: #ffc107;" # Yellow
+            styles[row.index.get_loc('YTD CII')] = 'color: #FFD700; font-weight: bold;'  # Yellow
         elif cii_val == "D":
-            cii_color = "color: #fd7e14;" # Orange
+            styles[row.index.get_loc('YTD CII')] = 'color: #FF8C00; font-weight: bold;'  # Orange
         elif cii_val == "E":
-            cii_color = "color: #dc3545;" # Red
-        
-        if cii_color:
-            styles[row.index.get_loc('YTD CII')] += cii_color
+            styles[row.index.get_loc('YTD CII')] = 'color: #FF0000; font-weight: bold;'  # Red
 
     return styles
 
 def create_excel_download_with_styling(df, filename):
-    """Create Excel file with styling."""
+    """Create Excel file with styling including CII color coding."""
     output = io.BytesIO()
     wb = Workbook()
     ws = wb.active
@@ -528,19 +535,18 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                cii_val = str(cell_value).upper()
-                font_color = "000000" # Default black
+                # Apply CII text color coding
+                cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
                 if cii_val == "A":
-                    font_color = "28A745" # Light Green
+                    cell.font = Font(color="90EE90", bold=True)  # Light green
                 elif cii_val == "B":
-                    font_color = "1E7E34" # Dark Green
+                    cell.font = Font(color="006400", bold=True)  # Dark green
                 elif cii_val == "C":
-                    font_color = "FFC107" # Yellow
+                    cell.font = Font(color="FFD700", bold=True)  # Yellow
                 elif cii_val == "D":
-                    font_color = "FD7E14" # Orange
+                    cell.font = Font(color="FF8C00", bold=True)  # Orange
                 elif cii_val == "E":
-                    font_color = "DC3545" # Red
-                cell.font = Font(color=font_color, bold=True)
+                    cell.font = Font(color="FF0000", bold=True)  # Red
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
@@ -578,20 +584,17 @@ def get_cell_color(cell_value):
     }
     return color_map.get(cell_value, None)
 
-def get_cii_text_color(cii_rating):
+def get_cii_text_color(cii_value):
     """Get text color for CII rating."""
-    cii_rating = str(cii_rating).upper()
-    if cii_rating == "A":
-        return RGBColor(40, 167, 69) # Light Green
-    elif cii_rating == "B":
-        return RGBColor(30, 126, 52) # Dark Green
-    elif cii_rating == "C":
-        return RGBColor(255, 193, 7) # Yellow
-    elif cii_rating == "D":
-        return RGBColor(253, 126, 20) # Orange
-    elif cii_rating == "E":
-        return RGBColor(220, 53, 69) # Red
-    return RGBColor(0, 0, 0) # Default black
+    cii_val = str(cii_value).upper() if pd.notna(cii_value) else "N/A"
+    color_map = {
+        "A": (144, 238, 144),  # Light green
+        "B": (0, 100, 0),      # Dark green
+        "C": (255, 215, 0),    # Yellow
+        "D": (255, 140, 0),    # Orange
+        "E": (255, 0, 0)       # Red
+    }
+    return color_map.get(cii_val, None)
 
 def set_cell_border(cell, **kwargs):
     """Set borders for a table cell."""
@@ -617,22 +620,22 @@ def set_cell_shading(cell, color_hex):
     tcPr.append(shd)
 
 def create_enhanced_word_report(df, template_path="Fleet Performance Template.docx", num_months=2):
-    """Create an enhanced Word report with improved table formatting."""
+    """Create an enhanced Word report with improved table formatting and CII color coding."""
     try:
         if not os.path.exists(template_path):
             st.error(f"Template file '{template_path}' not found in the repository root.")
             return None
 
         doc = Document(template_path)
-        
+      
         # Find placeholder and replace with report
         placeholder_found = False
-        
+      
         for paragraph in doc.paragraphs:
             if "{{Template}}" in paragraph.text:
                 paragraph.clear()
                 placeholder_found = True
-                
+              
                 # Add report title with better styling
                 title_paragraph = doc.add_paragraph()
                 title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
@@ -640,30 +643,30 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 title_run.font.bold = True
                 title_run.font.color.rgb = RGBColor(47, 117, 181)  # Blue color
                 title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+              
                 # Add generation date
                 date_paragraph = doc.add_paragraph()
                 date_run = date_paragraph.add_run(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
                 date_run.font.italic = True
                 date_run.font.size = Pt(12)
                 date_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+              
                 # Add some spacing
                 doc.add_paragraph("")
-                
+              
                 # Create table with simplified structure
                 table = doc.add_table(rows=1, cols=len(df.columns))
                 table.style = 'Table Grid'
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
-                
+              
                 # Set table width to page width
                 table.autofit = False
                 table.allow_autofit = False
-                
+              
                 # Define column widths based on content type
                 page_width = Inches(8.5)  # Standard page width minus margins
                 total_width = Inches(7.5)  # Usable width
-                
+              
                 # Calculate column widths - optimized for better distribution
                 col_widths = {}
                 for col_name in df.columns:
@@ -681,27 +684,27 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
                     else:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
-                
+              
                 # Set column widths using integer values
                 for i, col_name in enumerate(df.columns):
                     table.columns[i].width = col_widths[col_name]
-                
+              
                 # Style header row
                 header_cells = table.rows[0].cells
                 for i, col_name in enumerate(df.columns):
                     cell = header_cells[i]
                     cell.text = col_name
-                    
+                  
                     # Header styling
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     run = cell.paragraphs[0].runs[0]
                     run.font.bold = True
                     run.font.color.rgb = RGBColor(255, 255, 255)
                     run.font.size = Pt(10)
-                    
+                  
                     # Header background color
                     set_cell_shading(cell, "2F75B5")
-                    
+                  
                     # Header borders
                     set_cell_border(
                         cell,
@@ -710,7 +713,7 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                         bottom={"sz": 6, "val": "single", "color": "000000"},
                         right={"sz": 6, "val": "single", "color": "000000"}
                     )
-                
+              
                 # Add data rows
                 for _, row in df.iterrows():
                     row_cells = table.add_row().cells
@@ -718,46 +721,49 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                         cell = row_cells[i]
                         cell_value = str(value) if pd.notna(value) else "N/A"
                         cell.text = cell_value
-                        
+                      
                         # Cell styling based on column type
                         column_name = df.columns[i]
-                        
+                      
                         # Set font size
                         for paragraph in cell.paragraphs:
                             for run in paragraph.runs:
                                 run.font.size = Pt(9)
-                        
+                      
                         # Apply conditional formatting
                         if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
                             color_hex = get_cell_color(cell_value)
                             if color_hex:
                                 set_cell_shading(cell, color_hex)
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        elif column_name == 'YTD CII':
+                            # Apply CII text color coding
+                            cii_color = get_cii_text_color(cell_value)
+                            if cii_color:
+                                for paragraph in cell.paragraphs:
+                                    for run in paragraph.runs:
+                                        run.font.color.rgb = RGBColor(*cii_color)
+                                        run.font.bold = True
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         elif column_name == 'Comments':
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        elif column_name == 'YTD CII':
-                            for paragraph in cell.paragraphs:
-                                for run in paragraph.runs:
-                                    run.font.color.rgb = get_cii_text_color(cell_value)
-                                    run.font.bold = True # Make CII bold
-                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         else:
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        
+                      
                         # Set text wrapping and vertical alignment
                         tc = cell._tc
                         tcPr = tc.get_or_add_tcPr()
-                        
+                      
                         # Enable text wrapping
                         tcW = OxmlElement("w:tcW")
                         tcW.set(qn("w:type"), "auto")
                         tcPr.append(tcW)
-                        
+                      
                         # Set vertical alignment to top
                         vAlign = OxmlElement('w:vAlign')
                         vAlign.set(qn('w:val'), 'top')
                         tcPr.append(vAlign)
-                        
+                      
                         # Add borders
                         set_cell_border(
                             cell,
@@ -766,10 +772,10 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                             bottom={"sz": 6, "val": "single", "color": "000000"},
                             right={"sz": 6, "val": "single", "color": "000000"}
                         )
-                
+              
                 # Add page break before appendix
                 doc.add_page_break()
-                
+              
                 # Add Appendix section
                 appendix_title = doc.add_paragraph()
                 appendix_run = appendix_title.add_run("Appendix")
@@ -777,7 +783,7 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 appendix_run.font.bold = True
                 appendix_run.font.color.rgb = RGBColor(255, 255, 255)
                 appendix_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
+              
                 # Set appendix title background
                 appendix_title_format = appendix_title.paragraph_format
                 shading_elm = OxmlElement('w:shd')
@@ -785,17 +791,17 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 shading_elm.set(qn('w:color'), 'auto')
                 shading_elm.set(qn('w:fill'), '00B0F0')
                 appendix_title_format._element.get_or_add_pPr().append(shading_elm)
-                
+              
                 # Add spacing
                 doc.add_paragraph("")
-                
+              
                 # General Conditions section
                 general_heading = doc.add_paragraph()
                 general_run = general_heading.add_run("General Conditions")
                 general_run.font.size = Pt(14)
                 general_run.font.bold = True
                 general_run.font.color.rgb = RGBColor(47, 117, 181)
-                
+              
                 # Add bullet points for general conditions
                 conditions = [
                     "Analysis Period is Last Six Months or after the Last Event whichever is later",
@@ -803,14 +809,14 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                     "Days with Steaming hrs greater than 17 considered for analysis",
                     "Data is compared with Original Sea Trial"
                 ]
-                
+              
                 for condition in conditions:
                     p = doc.add_paragraph()
                     p.paragraph_format.left_indent = Inches(0.25)
                     p.paragraph_format.first_line_indent = Inches(-0.25)
                     run = p.add_run("• " + condition)
                     run.font.size = Pt(10)
-                
+              
                 # Hull Performance section
                 doc.add_paragraph("")
                 hull_heading = doc.add_paragraph()
@@ -818,14 +824,14 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 hull_run.font.size = Pt(14)
                 hull_run.font.bold = True
                 hull_run.font.color.rgb = RGBColor(47, 117, 181)
-                
+              
                 # Hull performance criteria with colors
                 hull_criteria = [
                     ("Excess Power < 15% – Rating Good", RGBColor(0, 176, 80)),
                     ("15% < Excess Power < 25% – Rating Average", RGBColor(255, 192, 0)),
                     ("Excess Power > 25% – Rating Poor", RGBColor(255, 0, 0))
                 ]
-                
+              
                 for criteria, color in hull_criteria:
                     p = doc.add_paragraph()
                     p.paragraph_format.left_indent = Inches(0.25)
@@ -833,7 +839,7 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                     run = p.add_run("• " + criteria)
                     run.font.size = Pt(10)
                     run.font.color.rgb = color
-                
+              
                 # Machinery Performance section
                 doc.add_paragraph("")
                 machinery_heading = doc.add_paragraph()
@@ -841,14 +847,14 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 machinery_run.font.size = Pt(14)
                 machinery_run.font.bold = True
                 machinery_run.font.color.rgb = RGBColor(47, 117, 181)
-                
+              
                 # Machinery performance criteria with colors
                 machinery_criteria = [
                     ("SFOC (g/kWh) within ±10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)),
                     ("SFOC (g/kWh) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)),
                     ("SFOC (g/kWh) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0))
                 ]
-                
+              
                 for criteria, color in machinery_criteria:
                     p = doc.add_paragraph()
                     p.paragraph_format.left_indent = Inches(0.25)
@@ -856,14 +862,39 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                     run = p.add_run("• " + criteria)
                     run.font.size = Pt(10)
                     run.font.color.rgb = color
-                
+
+                # CII Rating section
+                doc.add_paragraph("")
+                cii_heading = doc.add_paragraph()
+                cii_run = cii_heading.add_run("CII Rating")
+                cii_run.font.size = Pt(14)
+                cii_run.font.bold = True
+                cii_run.font.color.rgb = RGBColor(47, 117, 181)
+              
+                # CII performance criteria with colors
+                cii_criteria = [
+                    ("Rating A – Significantly Better Performance", RGBColor(144, 238, 144)),  # Light green
+                    ("Rating B – Better Performance", RGBColor(0, 100, 0)),                    # Dark green
+                    ("Rating C – Moderate Performance", RGBColor(255, 215, 0)),               # Yellow
+                    ("Rating D – Minor Inferior Performance", RGBColor(255, 140, 0)),         # Orange
+                    ("Rating E – Inferior Performance", RGBColor(255, 0, 0))                  # Red
+                ]
+              
+                for criteria, color in cii_criteria:
+                    p = doc.add_paragraph()
+                    p.paragraph_format.left_indent = Inches(0.25)
+                    p.paragraph_format.first_line_indent = Inches(-0.25)
+                    run = p.add_run("• " + criteria)
+                    run.font.size = Pt(10)
+                    run.font.color.rgb = color
+              
                 break
-        
+      
         if not placeholder_found:
             st.warning("Placeholder '{{Template}}' not found. Adding report at the end of document.")
             # If no placeholder found, add content at the end
             doc.add_page_break()
-            
+          
             # Add the same content as above but at the end
             title_paragraph = doc.add_paragraph()
             title_run = title_paragraph.add_run("Fleet Performance Analysis Report")
@@ -871,14 +902,14 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
             title_run.font.bold = True
             title_run.font.color.rgb = RGBColor(47, 117, 181)
             title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
+          
             # Continue with the rest of the report...
-        
+      
         # Save to bytes buffer
         output = io.BytesIO()
         doc.save(output)
         return output.getvalue()
-        
+      
     except Exception as e:
         st.error(f"Error creating Word report: {str(e)}")
         return None
@@ -952,7 +983,7 @@ def main():
                 <h2>{len(all_vessels)}</h2>
             </div>
             """, unsafe_allow_html=True)
-        
+      
         with col2:
             st.markdown(f"""
             <div class="metric-card">
@@ -960,7 +991,7 @@ def main():
                 <h2>{len(filtered_vessels)}</h2>
             </div>
             """, unsafe_allow_html=True)
-        
+      
         with col3:
             st.markdown(f"""
             <div class="metric-card">
@@ -1103,7 +1134,7 @@ def main():
 
         # Enhanced analytics section
         with st.expander("📈 Advanced Analytics & Insights", expanded=False):
-            tab1, tab2, tab3 = st.tabs(["🛡️ Hull Analysis", "⚙️ Engine Analysis", "📊 Trend Analysis"])
+            tab1, tab2, tab3, tab4 = st.tabs(["🛡️ Hull Analysis", "⚙️ Engine Analysis", "📊 Trend Analysis", "🌍 CII Analysis"])
 
             with tab1:
                 st.subheader("Hull Condition Distribution")
@@ -1129,7 +1160,7 @@ def main():
                                 "Poor": counts.get("Poor", 0),
                                 "N/A": counts.get("N/A", 0)
                             })
-                        
+                      
                         if hull_summary:
                             hull_summary_df = pd.DataFrame(hull_summary)
                             st.dataframe(hull_summary_df, use_container_width=True)
@@ -1159,14 +1190,14 @@ def main():
                                 "Anomalous": counts.get("Anomalous data", 0),
                                 "N/A": counts.get("N/A", 0)
                             })
-                        
+                      
                         if me_summary:
                             me_summary_df = pd.DataFrame(me_summary)
                             st.dataframe(me_summary_df, use_container_width=True)
 
             with tab3:
                 st.subheader("Performance Trends")
-                
+              
                 hull_cols = [col for col in st.session_state.report_data.columns if 'Hull Condition' in col]
                 me_cols = [col for col in st.session_state.report_data.columns if 'ME Efficiency' in col]
 
@@ -1177,11 +1208,11 @@ def main():
                         month = col.replace("Hull Condition ", "")
                         total_with_data = len(st.session_state.report_data[st.session_state.report_data[col] != "N/A"])
                         good_count = len(st.session_state.report_data[st.session_state.report_data[col] == "Good"])
-                        
+                      
                         if total_with_data > 0:
                             percentage = (good_count / total_with_data * 100)
                             hull_trend_data.append({"Month": month, "Good %": percentage})
-                    
+                  
                     if hull_trend_data:
                         hull_trend_df = pd.DataFrame(hull_trend_data)
                         if hull_trend_df["Good %"].sum() > 0:
@@ -1194,15 +1225,55 @@ def main():
                         month = col.replace("ME Efficiency ", "")
                         total_with_data = len(st.session_state.report_data[st.session_state.report_data[col] != "N/A"])
                         good_count = len(st.session_state.report_data[st.session_state.report_data[col] == "Good"])
-                        
+                      
                         if total_with_data > 0:
                             percentage = (good_count / total_with_data * 100)
                             me_trend_data.append({"Month": month, "Good %": percentage})
-                    
+                  
                     if me_trend_data:
                         me_trend_df = pd.DataFrame(me_trend_data)
                         if me_trend_df["Good %"].sum() > 0:
                             st.line_chart(me_trend_df.set_index("Month"), use_container_width=True)
+
+            with tab4:
+                st.subheader("CII Rating Distribution")
+                if 'YTD CII' in st.session_state.report_data.columns:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        cii_data = st.session_state.report_data['YTD CII'].value_counts()
+                        if len(cii_data) > 0:
+                            st.bar_chart(cii_data, use_container_width=True)
+                            st.caption("CII Rating Distribution")
+
+                    with col2:
+                        cii_summary = []
+                        counts = st.session_state.report_data['YTD CII'].value_counts()
+                        total_vessels = len(st.session_state.report_data)
+                        
+                        for rating in ['A', 'B', 'C', 'D', 'E']:
+                            count = counts.get(rating, 0)
+                            percentage = (count / total_vessels * 100) if total_vessels > 0 else 0
+                            cii_summary.append({
+                                "Rating": rating,
+                                "Count": count,
+                                "Percentage": f"{percentage:.1f}%"
+                            })
+                        
+                        # Add N/A if exists
+                        na_count = counts.get('N/A', 0) + sum(1 for x in st.session_state.report_data['YTD CII'] if pd.isna(x))
+                        if na_count > 0:
+                            na_percentage = (na_count / total_vessels * 100) if total_vessels > 0 else 0
+                            cii_summary.append({
+                                "Rating": "N/A",
+                                "Count": na_count,
+                                "Percentage": f"{na_percentage:.1f}%"
+                            })
+                        
+                        if cii_summary:
+                            cii_summary_df = pd.DataFrame(cii_summary)
+                            st.dataframe(cii_summary_df, use_container_width=True)
+                else:
+                    st.info("No CII data available for analysis")
 
     # Enhanced Help Section
     with st.expander("📖 User Guide & Features", expanded=False):
@@ -1223,11 +1294,13 @@ def main():
         - Interactive charts and visualizations
         - Multi-month trend analysis
         - Performance distribution insights
+        - CII rating analysis with color coding
 
         **📥 Professional Reports:**
         - Enhanced Excel reports with color coding
         - Beautifully formatted Word documents
         - Optimized table layouts with proper spacing
+        - CII rating color coding in all formats
 
         ### 📋 How to Use:
 
@@ -1242,7 +1315,7 @@ def main():
 
         **🛡️ Hull Condition:**
         - 🟢 **Good**: < 15% excess power
-        - 🟡 **Average**: 15-25% excess power  
+        - 🟡 **Average**: 15-25% excess power
         - 🔴 **Poor**: > 25% excess power
 
         **⚙️ Engine Efficiency:**
@@ -1250,6 +1323,13 @@ def main():
         - 🟡 **Average**: 180-190 g/kWh SFOC
         - 🔴 **Poor**: > 190 g/kWh SFOC
         - ⚪ **Anomalous**: < 160 g/kWh SFOC
+
+        **🌍 CII Rating:**
+        - 🟢 **A**: Significantly Better Performance (Light Green)
+        - 🟢 **B**: Better Performance (Dark Green)
+        - 🟡 **C**: Moderate Performance (Yellow)
+        - 🟠 **D**: Minor Inferior Performance (Orange)
+        - 🔴 **E**: Inferior Performance (Red)
         """)
 
 if __name__ == "__main__":
