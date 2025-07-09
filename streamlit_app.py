@@ -486,9 +486,11 @@ def set_cell_border(cell, **kwargs):
         if border_name in kwargs:
             border_element = OxmlElement(f"w:{border_name}")
             for attr, value in kwargs[border_name].items():
-                # Explicitly cast 'sz' to int to prevent TypeError
+                # Ensure 'sz' is an integer representing eighths of a point
                 if attr == "sz":
-                    border_element.set(qn(f"w:{attr}"), str(int(value)))
+                    # Convert points to eighths of a point (1 point = 8 eighths)
+                    # The value passed to sz is already in points, so we multiply by 8
+                    border_element.set(qn(f"w:{attr}"), str(int(value * 8)))
                 else:
                     border_element.set(qn(f"w:{attr}"), str(value))
             tcPr.append(border_element)
@@ -592,7 +594,9 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_s_no.merge(table.rows[1].cells[df.columns.get_loc('S. No.')]) # Merge with cell below
                 cell_s_no.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_s_no, "2F75B5")
-                set_cell_border(cell_s_no, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                # Convert Pt(6) to integer eighths of a point
+                border_sz = int(Pt(0.75).emu / 1270) # 0.75pt = 6 eighths of a point
+                set_cell_border(cell_s_no, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Vessel Name
                 cell_vessel_name = hdr_cells_0[df.columns.get_loc('Vessel Name')]
@@ -600,7 +604,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_vessel_name.merge(table.rows[1].cells[df.columns.get_loc('Vessel Name')]) # Merge with cell below
                 cell_vessel_name.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_vessel_name, "2F75B5")
-                set_cell_border(cell_vessel_name, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell_vessel_name, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Hull Condition Group
                 if hull_cols_base:
@@ -614,7 +618,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     merged_cell_hull.text = "Hull Condition"
                     merged_cell_hull.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     set_cell_shading(merged_cell_hull, "2F75B5")
-                    set_cell_border(merged_cell_hull, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                    set_cell_border(merged_cell_hull, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
                 
                 # ME Efficiency Group
                 if me_cols_base:
@@ -628,7 +632,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     merged_cell_me.text = "ME Efficiency"
                     merged_cell_me.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     set_cell_shading(merged_cell_me, "2F75B5")
-                    set_cell_border(merged_cell_me, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                    set_cell_border(merged_cell_me, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Potential Fuel Saving (MT/Day)
                 fuel_saving_col_idx = df.columns.get_loc('Potential Fuel Saving (MT/Day)')
@@ -637,7 +641,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_fuel_saving.merge(table.rows[1].cells[fuel_saving_col_idx]) # Merge with cell below
                 cell_fuel_saving.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_fuel_saving, "2F75B5")
-                set_cell_border(cell_fuel_saving, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell_fuel_saving, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # YTD CII
                 cii_col_idx = df.columns.get_loc('YTD CII')
@@ -646,7 +650,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_cii.merge(table.rows[1].cells[cii_col_idx]) # Merge with cell below
                 cell_cii.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_cii, "2F75B5")
-                set_cell_border(cell_cii, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell_cii, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Comments
                 comments_col_idx = df.columns.get_loc('Comments')
@@ -655,7 +659,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 cell_comments.merge(table.rows[1].cells[comments_col_idx]) # Merge with cell below
                 cell_comments.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell_comments, "2F75B5")
-                set_cell_border(cell_comments, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell_comments, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
 
                 # Populate the second header row (sub-categories for Hull and ME)
@@ -675,7 +679,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         cell.text = month_info # Fallback
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     set_cell_shading(cell, "2F75B5")
-                    set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                    set_cell_border(cell, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # ME Efficiency sub-headers
                 for i, col_name in enumerate(me_cols_base):
@@ -691,7 +695,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         cell.text = month_info # Fallback
                     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                     set_cell_shading(cell, "2F75B5")
-                    set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                    set_cell_border(cell, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
                 # Set font color for all header cells to white
                 for row_idx in range(2):
@@ -735,10 +739,10 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                         # Apply borders to data cells
                         set_cell_border(
                             cell,
-                            top={"sz": 6, "val": "single", "color": "000000"},
-                            left={"sz": 6, "val": "single", "color": "000000"},
-                            bottom={"sz": 6, "val": "single", "color": "000000"},
-                            right={"sz": 6, "val": "single", "color": "000000"},
+                            top={"sz": border_sz, "val": "single", "color": "000000"},
+                            left={"sz": border_sz, "val": "single", "color": "000000"},
+                            bottom={"sz": border_sz, "val": "single", "color": "000000"},
+                            right={"sz": border_sz, "val": "single", "color": "000000"},
                         )
 
                 # --- Add Appendix Section ---
@@ -875,7 +879,9 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_s_no.merge(table.rows[1].cells[df.columns.get_loc('S. No.')]) # Merge with cell below
             cell_s_no.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_s_no, "2F75B5")
-            set_cell_border(cell_s_no, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            # Convert Pt(6) to integer eighths of a point
+            border_sz = int(Pt(0.75).emu / 1270) # 0.75pt = 6 eighths of a point
+            set_cell_border(cell_s_no, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Vessel Name
             cell_vessel_name = hdr_cells_0[df.columns.get_loc('Vessel Name')]
@@ -883,7 +889,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_vessel_name.merge(table.rows[1].cells[df.columns.get_loc('Vessel Name')]) # Merge with cell below
             cell_vessel_name.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_vessel_name, "2F75B5")
-            set_cell_border(cell_vessel_name, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            set_cell_border(cell_vessel_name, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Hull Condition Group
             if hull_cols_base:
@@ -897,7 +903,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 merged_cell_hull.text = "Hull Condition"
                 merged_cell_hull.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(merged_cell_hull, "2F75B5")
-                set_cell_border(merged_cell_hull, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(merged_cell_hull, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
             
             # ME Efficiency Group
             if me_cols_base:
@@ -911,7 +917,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 merged_cell_me.text = "ME Efficiency"
                 merged_cell_me.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(merged_cell_me, "2F75B5")
-                set_cell_border(merged_cell_me, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(merged_cell_me, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Potential Fuel Saving (MT/Day)
             fuel_saving_col_idx = df.columns.get_loc('Potential Fuel Saving (MT/Day)')
@@ -920,7 +926,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_fuel_saving.merge(table.rows[1].cells[fuel_saving_col_idx]) # Merge with cell below
             cell_fuel_saving.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_fuel_saving, "2F75B5")
-            set_cell_border(cell_fuel_saving, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            set_cell_border(cell_fuel_saving, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # YTD CII
             cii_col_idx = df.columns.get_loc('YTD CII')
@@ -929,7 +935,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_cii.merge(table.rows[1].cells[cii_col_idx]) # Merge with cell below
             cell_cii.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_cii, "2F75B5")
-            set_cell_border(cell_cii, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            set_cell_border(cell_cii, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Comments
             comments_col_idx = df.columns.get_loc('Comments')
@@ -938,7 +944,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             cell_comments.merge(table.rows[1].cells[comments_col_idx]) # Merge with cell below
             cell_comments.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
             set_cell_shading(cell_comments, "2F75B5")
-            set_cell_border(cell_comments, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+            set_cell_border(cell_comments, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
 
             # Populate the second header row (sub-categories for Hull and ME)
@@ -958,7 +964,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     cell.text = month_info # Fallback
                 cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell, "2F75B5")
-                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # ME Efficiency sub-headers
             for i, col_name in enumerate(me_cols_base):
@@ -974,7 +980,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     cell.text = month_info # Fallback
                 cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                 set_cell_shading(cell, "2F75B5")
-                set_cell_border(cell, top={"sz": 6, "val": "single", "color": "000000"}, left={"sz": 6, "val": "single", "color": "000000"}, bottom={"sz": 6, "val": "single", "color": "000000"}, right={"sz": 6, "val": "single", "color": "000000"})
+                set_cell_border(cell, top={"sz": border_sz, "val": "single", "color": "000000"}, left={"sz": border_sz, "val": "single", "color": "000000"}, bottom={"sz": border_sz, "val": "single", "color": "000000"}, right={"sz": border_sz, "val": "single", "color": "000000"})
 
             # Set font color for all header cells to white
             for row_idx in range(2):
@@ -1017,10 +1023,10 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                     # Apply borders to data cells
                     set_cell_border(
                         cell,
-                        top={"sz": 6, "val": "single", "color": "000000"},
-                        left={"sz": 6, "val": "single", "color": "000000"},
-                        bottom={"sz": 6, "val": "single", "color": "000000"},
-                        right={"sz": 6, "val": "single", "color": "000000"},
+                        top={"sz": border_sz, "val": "single", "color": "000000"},
+                        left={"sz": border_sz, "val": "single", "color": "000000"},
+                        bottom={"sz": border_sz, "val": "single", "color": "000000"},
+                        right={"sz": border_sz, "val": "single", "color": "000000"},
                     )
 
             # --- Add Appendix Section (if placeholder not found) ---
