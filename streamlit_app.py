@@ -430,9 +430,9 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         df_final[prev_prev_month_hull_col_name] = "N/A"
 
     if f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
+        df_final[prev_prev_prev_month_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
     else:
-        df_final[prev_prev_prev_month_hull_col_name] = "N/A"
+        df_final[prev_prev_prev_month_col_name] = "N/A"
 
     # ME Efficiency logic
     def get_me_efficiency(value):
@@ -720,10 +720,10 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 # General Conditions
                 doc.add_paragraph() # Add a small space
                 doc.add_paragraph("General Conditions", style='Heading 3')
-                doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later", style='List Bullet')
-                doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.", style='List Bullet')
-                doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.", style='List Bullet')
-                doc.add_paragraph("Data is compared with Original Sea Trial", style='List Bullet')
+                doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later") # Removed style
+                doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.") # Removed style
+                doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.") # Removed style
+                doc.add_paragraph("Data is compared with Original Sea Trial") # Removed style
 
                 # Hull Performance
                 doc.add_paragraph() # Add a small space
@@ -731,7 +731,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
 
                 # Helper to add bullet points with specific colors
                 def add_colored_bullet(doc, text, color_rgb):
-                    p = doc.add_paragraph(style='List Bullet')
+                    p = doc.add_paragraph() # Removed style
                     run = p.add_run(text)
                     run.font.color.rgb = color_rgb
 
@@ -745,6 +745,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 add_colored_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
                 add_colored_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
                 add_colored_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
+
 
                 break # Exit loop after finding and processing the placeholder
 
@@ -846,10 +847,10 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             # General Conditions
             doc.add_paragraph() # Add a small space
             doc.add_paragraph("General Conditions", style='Heading 3')
-            doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later", style='List Bullet')
-            doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.", style='List Bullet')
-            doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.", style='List Bullet')
-            doc.add_paragraph("Data is compared with Original Sea Trial", style='List Bullet')
+            doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later") # Removed style
+            doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.") # Removed style
+            doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.") # Removed style
+            doc.add_paragraph("Data is compared with Original Sea Trial") # Removed style
 
             # Hull Performance
             doc.add_paragraph() # Add a small space
@@ -857,7 +858,7 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
 
             # Helper to add bullet points with specific colors
             def add_colored_bullet(doc, text, color_rgb):
-                p = doc.add_paragraph(style='List Bullet')
+                p = doc.add_paragraph() # Removed style
                 run = p.add_run(text)
                 run.font.color.rgb = color_rgb
 
