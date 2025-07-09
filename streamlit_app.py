@@ -10,12 +10,13 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.styles.colors import Color
 import time
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import RGBColor
 from docx.oxml.ns import qn # For XML manipulation
 from docx.oxml import OxmlElement # For XML manipulation
+from docx.shared import Pt # For font size
+from docx.enum.text import WD_ALIGN_PARAGRAPH # For paragraph alignment
 import os
 
 # Page configuration
@@ -430,9 +431,9 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         df_final[prev_prev_month_hull_col_name] = "N/A"
 
     if f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}' in df_final.columns:
-        df_final[prev_prev_prev_month_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
+        df_final[prev_prev_prev_month_hull_col_name] = df_final[f'Hull Roughness Power Loss % {last_day_prev_prev_prev_month_hull.strftime("%b %y")}'].apply(get_hull_condition)
     else:
-        df_final[prev_prev_prev_month_col_name] = "N/A"
+        df_final[prev_prev_prev_month_hull_col_name] = "N/A"
 
     # ME Efficiency logic
     def get_me_efficiency(value):
@@ -720,31 +721,43 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
                 # General Conditions
                 doc.add_paragraph() # Add a small space
                 doc.add_paragraph("General Conditions", style='Heading 3')
-                doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later") # Removed style
-                doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.") # Removed style
-                doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.") # Removed style
-                doc.add_paragraph("Data is compared with Original Sea Trial") # Removed style
+
+                # Custom bullet points for General Conditions
+                def add_custom_bullet(doc, text):
+                    p = doc.add_paragraph()
+                    p.paragraph_format.left_indent = Inches(0.25) # Indent for bullet
+                    p.paragraph_format.first_line_indent = Inches(-0.25) # Outdent bullet
+                    run = p.add_run("•\t" + text) # Add bullet character and tab
+                    run.font.size = Pt(10) # Adjust font size if needed
+
+                add_custom_bullet(doc, "Analysis Period is Last Six Months or the after the Last Event which ever is later")
+                add_custom_bullet(doc, "Days with Good Weather (BF<=4) are considered for analysis.")
+                add_custom_bullet(doc, "Days with Steaming hrs greater than 17 considered for analysis.")
+                add_custom_bullet(doc, "Data is compared with Original Sea Trial")
 
                 # Hull Performance
                 doc.add_paragraph() # Add a small space
                 doc.add_paragraph("Hull Performance", style='Heading 3')
 
-                # Helper to add bullet points with specific colors
-                def add_colored_bullet(doc, text, color_rgb):
-                    p = doc.add_paragraph() # Removed style
-                    run = p.add_run(text)
+                # Helper to add bullet points with specific colors and custom formatting
+                def add_colored_custom_bullet(doc, text, color_rgb):
+                    p = doc.add_paragraph()
+                    p.paragraph_format.left_indent = Inches(0.25) # Indent for bullet
+                    p.paragraph_format.first_line_indent = Inches(-0.25) # Outdent bullet
+                    run = p.add_run("•\t" + text) # Add bullet character and tab
                     run.font.color.rgb = color_rgb
+                    run.font.size = Pt(10) # Adjust font size if needed
 
-                add_colored_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
-                add_colored_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
-                add_colored_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
+                add_colored_custom_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
+                add_colored_custom_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
+                add_colored_custom_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
 
                 # Machinery Performance
                 doc.add_paragraph() # Add a small space
                 doc.add_paragraph("Machinery Performance", style='Heading 3')
-                add_colored_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
-                add_colored_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
-                add_colored_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
+                add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
+                add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
+                add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
 
 
                 break # Exit loop after finding and processing the placeholder
@@ -847,31 +860,43 @@ def create_advanced_word_report(df, template_path="Fleet Performance Template.do
             # General Conditions
             doc.add_paragraph() # Add a small space
             doc.add_paragraph("General Conditions", style='Heading 3')
-            doc.add_paragraph("Analysis Period is Last Six Months or the after the Last Event which ever is later") # Removed style
-            doc.add_paragraph("Days with Good Weather (BF<=4) are considered for analysis.") # Removed style
-            doc.add_paragraph("Days with Steaming hrs greater than 17 considered for analysis.") # Removed style
-            doc.add_paragraph("Data is compared with Original Sea Trial") # Removed style
+
+            # Custom bullet points for General Conditions
+            def add_custom_bullet(doc, text):
+                p = doc.add_paragraph()
+                p.paragraph_format.left_indent = Inches(0.25) # Indent for bullet
+                p.paragraph_format.first_line_indent = Inches(-0.25) # Outdent bullet
+                run = p.add_run("•\t" + text) # Add bullet character and tab
+                run.font.size = Pt(10) # Adjust font size if needed
+
+            add_custom_bullet(doc, "Analysis Period is Last Six Months or the after the Last Event which ever is later")
+            add_custom_bullet(doc, "Days with Good Weather (BF<=4) are considered for analysis.")
+            add_custom_bullet(doc, "Days with Steaming hrs greater than 17 considered for analysis.")
+            add_custom_bullet(doc, "Data is compared with Original Sea Trial")
 
             # Hull Performance
             doc.add_paragraph() # Add a small space
             doc.add_paragraph("Hull Performance", style='Heading 3')
 
-            # Helper to add bullet points with specific colors
-            def add_colored_bullet(doc, text, color_rgb):
-                p = doc.add_paragraph() # Removed style
-                run = p.add_run(text)
+            # Helper to add bullet points with specific colors and custom formatting
+            def add_colored_custom_bullet(doc, text, color_rgb):
+                p = doc.add_paragraph()
+                p.paragraph_format.left_indent = Inches(0.25) # Indent for bullet
+                p.paragraph_format.first_line_indent = Inches(-0.25) # Outdent bullet
+                run = p.add_run("•\t" + text) # Add bullet character and tab
                 run.font.color.rgb = color_rgb
+                run.font.size = Pt(10) # Adjust font size if needed
 
-            add_colored_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
-            add_colored_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
-            add_colored_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
+            add_colored_custom_bullet(doc, "Excess Power < 15 %– Rating Good", RGBColor(0, 176, 80)) # Green
+            add_colored_custom_bullet(doc, "15< Excess Power < 25 % – Rating Average", RGBColor(255, 192, 0)) # Orange
+            add_colored_custom_bullet(doc, "Excess Power > 25 % – Rating Poor", RGBColor(255, 0, 0)) # Red
 
             # Machinery Performance
             doc.add_paragraph() # Add a small space
             doc.add_paragraph("Machinery Performance", style='Heading 3')
-            add_colored_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
-            add_colored_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
-            add_colored_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
+            add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) within +/- 10 from Shop test condition are considered as \"Good\"", RGBColor(0, 176, 80)) # Green
+            add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) Greater than 10 and less than 20 are considered as \"Average\"", RGBColor(255, 192, 0)) # Orange
+            add_colored_custom_bullet(doc, "SFOC(Grms/kW.hr) Above 20 are considered as \"Poor\"", RGBColor(255, 0, 0)) # Red
 
 
         # Save to bytes buffer
