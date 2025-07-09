@@ -491,9 +491,9 @@ def style_condition_columns(row):
     if 'YTD CII' in row.index:
         cii_val = str(row['YTD CII']).upper() if pd.notna(row['YTD CII']) else "N/A"
         if cii_val == "A":
-            styles[row.index.get_loc('YTD CII')] = 'color: #90EE90; font-weight: bold;'  # Light green
-        elif cii_val == "B":
             styles[row.index.get_loc('YTD CII')] = 'color: #006400; font-weight: bold;'  # Dark green
+        elif cii_val == "B":
+            styles[row.index.get_loc('YTD CII')] = 'color: #90EE90; font-weight: bold;'  # Light green
         elif cii_val == "C":
             styles[row.index.get_loc('YTD CII')] = 'color: #FFD700; font-weight: bold;'  # Yellow
         elif cii_val == "D":
@@ -534,24 +534,7 @@ def create_excel_download_with_styling(df, filename):
                 cell.font = Font(color="000000")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                # Apply CII text color coding using direct hex values
-                cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
-                try:
-                    if cii_val == "A":
-                        cell.font = Font(color="90EE90", bold=True)  # Light green
-                    elif cii_val == "B":
-                        cell.font = Font(color="006400", bold=True)  # Dark green
-                    elif cii_val == "C":
-                        cell.font = Font(color="FFD700", bold=True)  # Yellow
-                    elif cii_val == "D":
-                        cell.font = Font(color="FF8C00", bold=True)  # Orange
-                    elif cii_val == "E":
-                        cell.font = Font(color="FF0000", bold=True)  # Red
-                    else:
-                        cell.font = Font(bold=True)
-                except:
-                    # If color fails, just make it bold
-                    cell.font = Font(bold=True)
+                # Remove CII color coding for Excel to avoid color errors
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
@@ -672,23 +655,23 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                 page_width = Inches(8.5)  # Standard page width minus margins
                 total_width = Inches(7.5)  # Usable width
               
-                # Calculate column widths - optimized for better distribution
+                # Calculate column widths - optimized for better distribution with smaller S. No.
                 col_widths = {}
                 for col_name in df.columns:
                     if col_name == 'S. No.':
-                        col_widths[col_name] = 432000  # 0.3 inches in EMUs (reduced)
+                        col_widths[col_name] = 288000  # 0.2 inches in EMUs (reduced from 0.3)
                     elif col_name == 'Vessel Name':
-                        col_widths[col_name] = 1728000  # 1.2 inches in EMUs (reduced)
+                        col_widths[col_name] = 1728000  # 1.2 inches in EMUs
                     elif col_name == 'Comments':
-                        col_widths[col_name] = 5760000  # 4.0 inches in EMUs (significantly increased)
+                        col_widths[col_name] = 5760000  # 4.0 inches in EMUs
                     elif col_name == 'Potential Fuel Saving (MT/Day)':
-                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs (reduced)
+                        col_widths[col_name] = 1152000  # 0.8 inches in EMUs
                     elif col_name == 'YTD CII':
-                        col_widths[col_name] = 576000  # 0.4 inches in EMUs (reduced)
+                        col_widths[col_name] = 576000  # 0.4 inches in EMUs
                     elif 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
-                        col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs
                     else:
-                        col_widths[col_name] = 864000  # 0.6 inches in EMUs (reduced)
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs
               
                 # Set column widths using integer values
                 for i, col_name in enumerate(df.columns):
