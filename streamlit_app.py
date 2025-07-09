@@ -853,29 +853,29 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                     run.font.color.rgb = color
 
                 # CII Rating section
-                doc.add_paragraph("")
-                cii_heading = doc.add_paragraph()
-                cii_run = cii_heading.add_run("CII Rating")
-                cii_run.font.size = Pt(14)
-                cii_run.font.bold = True
-                cii_run.font.color.rgb = RGBColor(47, 117, 181)
+                # doc.add_paragraph("")
+                # cii_heading = doc.add_paragraph()
+                # cii_run = cii_heading.add_run("CII Rating")
+                # cii_run.font.size = Pt(14)
+                # cii_run.font.bold = True
+                # cii_run.font.color.rgb = RGBColor(47, 117, 181)
               
                 # CII performance criteria with colors
-                cii_criteria = [
-                    ("Rating A – Significantly Better Performance", RGBColor(144, 238, 144)),  # Light green
-                    ("Rating B – Better Performance", RGBColor(0, 100, 0)),                    # Dark green
-                    ("Rating C – Moderate Performance", RGBColor(255, 215, 0)),               # Yellow
-                    ("Rating D – Minor Inferior Performance", RGBColor(255, 140, 0)),         # Orange
-                    ("Rating E – Inferior Performance", RGBColor(255, 0, 0))                  # Red
-                ]
+                # cii_criteria = [
+                #     ("Rating A – Significantly Better Performance", RGBColor(144, 238, 144)),  # Light green
+                #     ("Rating B – Better Performance", RGBColor(0, 100, 0)),                    # Dark green
+                #     ("Rating C – Moderate Performance", RGBColor(255, 215, 0)),               # Yellow
+                #     ("Rating D – Minor Inferior Performance", RGBColor(255, 140, 0)),         # Orange
+                #     ("Rating E – Inferior Performance", RGBColor(255, 0, 0))                  # Red
+                # ]
               
-                for criteria, color in cii_criteria:
-                    p = doc.add_paragraph()
-                    p.paragraph_format.left_indent = Inches(0.25)
-                    p.paragraph_format.first_line_indent = Inches(-0.25)
-                    run = p.add_run("• " + criteria)
-                    run.font.size = Pt(10)
-                    run.font.color.rgb = color
+                # for criteria, color in cii_criteria:
+                #     p = doc.add_paragraph()
+                #     p.paragraph_format.left_indent = Inches(0.25)
+                #     p.paragraph_format.first_line_indent = Inches(-0.25)
+                #     run = p.add_run("• " + criteria)
+                #     run.font.size = Pt(10)
+                #     run.font.color.rgb = color
               
                 break
       
@@ -1312,13 +1312,6 @@ def main():
         - 🟡 **Average**: 180-190 g/kWh SFOC
         - 🔴 **Poor**: > 190 g/kWh SFOC
         - ⚪ **Anomalous**: < 160 g/kWh SFOC
-
-        **🌍 CII Rating:**
-        - 🟢 **A**: Significantly Better Performance (Light Green)
-        - 🟢 **B**: Better Performance (Dark Green)
-        - 🟡 **C**: Moderate Performance (Yellow)
-        - 🟠 **D**: Minor Inferior Performance (Orange)
-        - 🔴 **E**: Inferior Performance (Red)
         """)
 
 if __name__ == "__main__":
