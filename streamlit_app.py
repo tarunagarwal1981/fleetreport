@@ -355,7 +355,7 @@ def query_report_data(lambda_url, vessel_names, num_months):
         hull_date_str_start = target_month_first_day.strftime("%Y-%m-%d")
         hull_date_str_end = target_month_last_day.strftime("%Y-%m-%d")
         hull_col_name = f"Hull Condition {target_month_last_day.strftime('%b %y')}"
-        hull_power_loss_col_name = f"Hull Roughness Power Loss % {target_month_last_day.strftime('%b %y')}"
+        hull_power_loss_col_name = f"Excess Power % {target_month_last_day.strftime('%b %y')}"
         hull_dates_info.append({
             'date_str_start': hull_date_str_start,
             'date_str_end': hull_date_str_end,
@@ -547,9 +547,9 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         if hull_info['power_loss_col_name'] in df_final.columns:
             # Create Hull Condition column (Good/Average/Poor)
             df_final[hull_info['col_name']] = df_final[hull_info['power_loss_col_name']].apply(get_hull_condition)
-            # Format power loss percentage column (round to 2 decimals, keep as number for sorting)
+            # Format power loss percentage column (round to 1 decimal, keep as number for sorting)
             df_final[hull_info['power_loss_col_name']] = df_final[hull_info['power_loss_col_name']].apply(
-                lambda x: round(x, 2) if pd.notna(x) else pd.NA
+                lambda x: round(x, 1) if pd.notna(x) else pd.NA
             )
         else:
             df_final[hull_info['col_name']] = "N/A"
@@ -629,7 +629,7 @@ def style_condition_columns(row):
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
     
     # Style hull power loss percentage columns (based on numeric values)
-    hull_power_loss_cols = [col for col in row.index if 'Hull Roughness Power Loss %' in col]
+    hull_power_loss_cols = [col for col in row.index if 'Excess Power %' in col]
     for col_name in hull_power_loss_cols:
         if col_name in row.index:
             power_loss_val = row[col_name]
@@ -659,19 +659,19 @@ def style_condition_columns(row):
             elif me_val == "Anomalous data":
                 styles[row.index.get_loc(col_name)] = 'background-color: #FF0000; color: white;'  # Red background
 
-    # Style YTD CII column with text color only (updated A and B colors)
+    # Style YTD CII column with background colors and black text
     if 'YTD CII' in row.index:
         cii_val = str(row['YTD CII']).upper() if pd.notna(row['YTD CII']) else "N/A"
         if cii_val == "A":
-            styles[row.index.get_loc('YTD CII')] = 'color: #006400; font-weight: bold;'  # Dark green
+            styles[row.index.get_loc('YTD CII')] = 'background-color: #006400; color: black; font-weight: bold;'  # Dark green background
         elif cii_val == "B":
-            styles[row.index.get_loc('YTD CII')] = 'color: #90EE90; font-weight: bold;'  # Light green
+            styles[row.index.get_loc('YTD CII')] = 'background-color: #90EE90; color: black; font-weight: bold;'  # Light green background
         elif cii_val == "C":
-            styles[row.index.get_loc('YTD CII')] = 'color: #FFD700; font-weight: bold;'  # Yellow
+            styles[row.index.get_loc('YTD CII')] = 'background-color: #FFD700; color: black; font-weight: bold;'  # Yellow background
         elif cii_val == "D":
-            styles[row.index.get_loc('YTD CII')] = 'color: #FF8C00; font-weight: bold;'  # Orange
+            styles[row.index.get_loc('YTD CII')] = 'background-color: #FF8C00; color: black; font-weight: bold;'  # Orange background
         elif cii_val == "E":
-            styles[row.index.get_loc('YTD CII')] = 'color: #FF0000; font-weight: bold;'  # Red
+            styles[row.index.get_loc('YTD CII')] = 'background-color: #FF0000; color: black; font-weight: bold;'  # Red background
 
     return styles
 
@@ -703,12 +703,12 @@ def create_excel_download_with_styling(df, filename):
                 elif cell_value == "Poor":
                     cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
-            elif 'Hull Roughness Power Loss %' in col_name:
+            elif 'Excess Power %' in col_name:
                 # Power Loss percentage columns (numeric values)
                 if pd.notna(cell_value):
                     try:
                         power_loss_num = float(cell_value)
-                        cell.number_format = '0.00'  # Format as number with 2 decimals
+                        cell.number_format = '0.0'  # Format as number with 1 decimal
                         if power_loss_num < 15:
                             cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
                         elif 15 <= power_loss_num <= 25:
@@ -730,7 +730,19 @@ def create_excel_download_with_styling(df, filename):
                     cell.font = Font(color="FFFFFF")  # White text on red background
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'YTD CII':
-                # Remove CII color coding for Excel to avoid color errors
+                # Apply CII background color coding
+                cii_val = str(cell_value).upper() if pd.notna(cell_value) else "N/A"
+                cell.font = Font(bold=True, color="000000")  # Black text
+                if cii_val == "A":
+                    cell.fill = PatternFill(start_color="006400", end_color="006400", fill_type="solid")  # Dark green
+                elif cii_val == "B":
+                    cell.fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")  # Light green
+                elif cii_val == "C":
+                    cell.fill = PatternFill(start_color="FFD700", end_color="FFD700", fill_type="solid")  # Yellow
+                elif cii_val == "D":
+                    cell.fill = PatternFill(start_color="FF8C00", end_color="FF8C00", fill_type="solid")  # Orange
+                elif cii_val == "E":
+                    cell.fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")  # Red
                 cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
             elif col_name == 'Comments':
                 cell.alignment = Alignment(wrap_text=True, horizontal='left', vertical='top')
@@ -768,15 +780,15 @@ def get_cell_color(cell_value):
     }
     return color_map.get(cell_value, None)
 
-def get_cii_text_color(cii_value):
-    """Get text color for CII rating (updated A and B colors)."""
+def get_cii_background_color(cii_value):
+    """Get background color hex for CII rating."""
     cii_val = str(cii_value).upper() if pd.notna(cii_value) else "N/A"
     color_map = {
-        "A": (0, 100, 0),      # Dark green
-        "B": (144, 238, 144),  # Light green
-        "C": (255, 215, 0),    # Yellow
-        "D": (255, 140, 0),    # Orange
-        "E": (255, 0, 0)       # Red
+        "A": "006400",      # Dark green
+        "B": "90EE90",      # Light green
+        "C": "FFD700",      # Yellow
+        "D": "FF8C00",      # Orange
+        "E": "FF0000"       # Red
     }
     return color_map.get(cii_val, None)
 
@@ -866,7 +878,7 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                         col_widths[col_name] = 576000  # 0.4 inches in EMUs
                     elif 'Hull Condition' in col_name and 'Power Loss' not in col_name:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs
-                    elif 'Hull Roughness Power Loss %' in col_name:
+                    elif 'Excess Power %' in col_name:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs
                     elif 'ME Efficiency' in col_name:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs
@@ -925,13 +937,13 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                             if color_hex:
                                 set_cell_shading(cell, color_hex)
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        elif 'Hull Roughness Power Loss %' in column_name:
+                        elif 'Excess Power %' in column_name:
                             # Power Loss percentage columns (numeric values)
                             try:
                                 if pd.notna(value):
                                     power_loss_num = float(value)
-                                    # Format as number with 2 decimal places
-                                    cell.text = f"{power_loss_num:.2f}"
+                                    # Format as number with 1 decimal place
+                                    cell.text = f"{power_loss_num:.1f}"
                                     # Apply color based on numeric value
                                     if power_loss_num < 15:
                                         set_cell_shading(cell, "D4EDDA")  # Green
@@ -948,13 +960,15 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                                 set_cell_shading(cell, color_hex)
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         elif column_name == 'YTD CII':
-                            # Apply CII text color coding
-                            cii_color = get_cii_text_color(cell_value)
-                            if cii_color:
-                                for paragraph in cell.paragraphs:
-                                    for run in paragraph.runs:
-                                        run.font.color.rgb = RGBColor(*cii_color)
-                                        run.font.bold = True
+                            # Apply CII background color coding with black text
+                            cii_bg_color = get_cii_background_color(cell_value)
+                            if cii_bg_color:
+                                set_cell_shading(cell, cii_bg_color)
+                            # Set text to black and bold
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.color.rgb = RGBColor(0, 0, 0)  # Black text
+                                    run.font.bold = True
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
                         elif column_name == 'Comments':
                             cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
