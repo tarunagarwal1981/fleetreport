@@ -542,12 +542,18 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
         else:
             return "Poor"
 
-    # Apply Hull Condition to historical columns
+    # Apply Hull Condition to historical columns and format power loss values
     for hull_info in hull_dates_info:
         if hull_info['power_loss_col_name'] in df_final.columns:
+            # Create Hull Condition column (Good/Average/Poor)
             df_final[hull_info['col_name']] = df_final[hull_info['power_loss_col_name']].apply(get_hull_condition)
+            # Format power loss percentage column (round to 2 decimals, keep as number for sorting)
+            df_final[hull_info['power_loss_col_name']] = df_final[hull_info['power_loss_col_name']].apply(
+                lambda x: round(x, 2) if pd.notna(x) else pd.NA
+            )
         else:
             df_final[hull_info['col_name']] = "N/A"
+            df_final[hull_info['power_loss_col_name']] = pd.NA
 
     # ME Efficiency logic and comments
     def get_me_efficiency_and_comment(value):
@@ -584,9 +590,15 @@ WHERE vp.vessel_name IN ({vessel_names_list_str})
     df_final = df_final.drop(columns=['temp_comments_list'])
 
     # Define the desired order of columns (hide Potential Fuel Saving)
+    # Order: S. No., Vessel Name, All Power Loss % columns, All Hull Condition columns, ME Efficiency, YTD CII, Comments
     desired_columns_order = ['S. No.', 'Vessel Name']
+    # Add all Power Loss % columns first (for each month)
     for hull_info in hull_dates_info:
-        desired_columns_order.append(hull_info['col_name'])
+        desired_columns_order.append(hull_info['power_loss_col_name'])  # Power Loss % (numeric value)
+    # Then add all Hull Condition columns (for each month)
+    for hull_info in hull_dates_info:
+        desired_columns_order.append(hull_info['col_name'])  # Hull Condition (Good/Average/Poor)
+    # Add ME Efficiency columns
     for me_info in me_dates_info:
         desired_columns_order.append(me_info['col_name'])
     # desired_columns_order.append('Potential Fuel Saving (MT/Day)')  # Hidden
@@ -605,7 +617,7 @@ def style_condition_columns(row):
     styles = [''] * len(row)
 
     # Style hull condition columns
-    hull_condition_cols = [col for col in row.index if 'Hull Condition' in col]
+    hull_condition_cols = [col for col in row.index if 'Hull Condition' in col and 'Power Loss' not in col]
     for col_name in hull_condition_cols:
         if col_name in row.index:
             hull_val = row[col_name]
@@ -615,6 +627,23 @@ def style_condition_columns(row):
                 styles[row.index.get_loc(col_name)] = 'background-color: #fff3cd; color: black;'
             elif hull_val == "Poor":
                 styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black;'
+    
+    # Style hull power loss percentage columns (based on numeric values)
+    hull_power_loss_cols = [col for col in row.index if 'Hull Roughness Power Loss %' in col]
+    for col_name in hull_power_loss_cols:
+        if col_name in row.index:
+            power_loss_val = row[col_name]
+            if pd.notna(power_loss_val):
+                try:
+                    power_loss_num = float(power_loss_val)
+                    if power_loss_num < 15:
+                        styles[row.index.get_loc(col_name)] = 'background-color: #d4edda; color: black; font-weight: 500;'
+                    elif 15 <= power_loss_num <= 25:
+                        styles[row.index.get_loc(col_name)] = 'background-color: #fff3cd; color: black; font-weight: 500;'
+                    else:
+                        styles[row.index.get_loc(col_name)] = 'background-color: #f8d7da; color: black; font-weight: 500;'
+                except (ValueError, TypeError):
+                    pass
 
     # Style ME efficiency columns
     me_efficiency_cols = [col for col in row.index if 'ME Efficiency' in col]
@@ -665,7 +694,31 @@ def create_excel_download_with_styling(df, filename):
             cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
 
-            if 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
+            if 'Hull Condition' in col_name and 'Power Loss' not in col_name:
+                # Hull Condition text columns (Good/Average/Poor)
+                if cell_value == "Good":
+                    cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
+                elif cell_value == "Average":
+                    cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+                elif cell_value == "Poor":
+                    cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
+            elif 'Hull Roughness Power Loss %' in col_name:
+                # Power Loss percentage columns (numeric values)
+                if pd.notna(cell_value):
+                    try:
+                        power_loss_num = float(cell_value)
+                        cell.number_format = '0.00'  # Format as number with 2 decimals
+                        if power_loss_num < 15:
+                            cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
+                        elif 15 <= power_loss_num <= 25:
+                            cell.fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
+                        else:
+                            cell.fill = PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid")
+                    except (ValueError, TypeError):
+                        pass
+                cell.alignment = Alignment(wrap_text=True, horizontal='center', vertical='center')
+            elif 'ME Efficiency' in col_name:
                 if cell_value == "Good":
                     cell.fill = PatternFill(start_color="D4EDDA", end_color="D4EDDA", fill_type="solid")
                 elif cell_value == "Average":
@@ -811,7 +864,11 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                         col_widths[col_name] = 1152000  # 0.8 inches in EMUs
                     elif col_name == 'YTD CII':
                         col_widths[col_name] = 576000  # 0.4 inches in EMUs
-                    elif 'Hull Condition' in col_name or 'ME Efficiency' in col_name:
+                    elif 'Hull Condition' in col_name and 'Power Loss' not in col_name:
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs
+                    elif 'Hull Roughness Power Loss %' in col_name:
+                        col_widths[col_name] = 864000  # 0.6 inches in EMUs
+                    elif 'ME Efficiency' in col_name:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs
                     else:
                         col_widths[col_name] = 864000  # 0.6 inches in EMUs
@@ -862,7 +919,30 @@ def create_enhanced_word_report(df, template_path="Fleet Performance Template.do
                                 run.font.size = Pt(9)
                       
                         # Apply conditional formatting
-                        if 'Hull Condition' in column_name or 'ME Efficiency' in column_name:
+                        if 'Hull Condition' in column_name and 'Power Loss' not in column_name:
+                            # Hull Condition text columns (Good/Average/Poor)
+                            color_hex = get_cell_color(cell_value)
+                            if color_hex:
+                                set_cell_shading(cell, color_hex)
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        elif 'Hull Roughness Power Loss %' in column_name:
+                            # Power Loss percentage columns (numeric values)
+                            try:
+                                if pd.notna(value):
+                                    power_loss_num = float(value)
+                                    # Format as number with 2 decimal places
+                                    cell.text = f"{power_loss_num:.2f}"
+                                    # Apply color based on numeric value
+                                    if power_loss_num < 15:
+                                        set_cell_shading(cell, "D4EDDA")  # Green
+                                    elif 15 <= power_loss_num <= 25:
+                                        set_cell_shading(cell, "FFF3CD")  # Yellow
+                                    else:
+                                        set_cell_shading(cell, "F8D7DA")  # Red
+                            except (ValueError, TypeError):
+                                pass
+                            cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        elif 'ME Efficiency' in column_name:
                             color_hex = get_cell_color(cell_value)
                             if color_hex:
                                 set_cell_shading(cell, color_hex)
