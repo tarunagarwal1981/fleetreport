@@ -17,6 +17,7 @@ from docx.oxml import OxmlElement
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 import os
+from collections import defaultdict
 
 # Page configuration with improved styling
 st.set_page_config(
@@ -30,64 +31,140 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main-header {
-        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%);
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
+        background: linear-gradient(120deg, #16222A 0%, #3A6073 100%);
+        padding: 2.2rem;
+        border-radius: 18px;
+        margin-bottom: 1.5rem;
         text-align: center;
         color: white;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 15px 35px rgba(0,0,0,0.15);
     }
-  
     .section-header {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
+        background: linear-gradient(90deg, #3A6073 0%, #16222A 100%);
+        padding: 0.9rem 1.2rem;
+        border-radius: 12px;
+        margin: 1.5rem 0 0.8rem 0;
         color: white;
-        font-weight: bold;
+        font-weight: 600;
+        letter-spacing: 0.5px;
     }
-  
-    .metric-card {
-        background: white;
+    .summary-bar {
+        background: #ffffff;
+        border: 1px solid rgba(22,34,42,0.08);
+        border-radius: 16px;
         padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2E86AB;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        margin: 0.5rem 0;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+        margin-bottom: 1.2rem;
     }
-  
+    .summary-chip {
+        flex: 1 1 180px;
+        min-width: 140px;
+        background: #f6f8fb;
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        border: 1px solid rgba(58,96,115,0.12);
+    }
+    .summary-chip h4 {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #5f6c7b;
+        font-weight: 500;
+    }
+    .summary-chip p {
+        margin: 0.2rem 0 0 0;
+        font-size: 1.35rem;
+        font-weight: 600;
+        color: #16222A;
+    }
+    .metric-card {
+        background: #ffffff;
+        padding: 1rem;
+        border-radius: 12px;
+        border: 1px solid rgba(58,96,115,0.12);
+        box-shadow: 0 8px 18px rgba(0,0,0,0.06);
+        margin: 0.4rem 0;
+    }
+    .doc-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.35rem 0.9rem;
+        background: rgba(58,96,115,0.12);
+        border-radius: 999px;
+        font-size: 0.85rem;
+        color: #16222A;
+        font-weight: 600;
+    }
     .stButton > button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        background: linear-gradient(120deg, #0f2027, #203a43, #2c5364);
         color: white;
         border: none;
-        border-radius: 8px;
-        padding: 0.5rem 1rem;
-        font-weight: bold;
-        transition: all 0.3s ease;
+        border-radius: 10px;
+        padding: 0.55rem 1.25rem;
+        font-weight: 600;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-  
     .stButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        box-shadow: 0 12px 20px rgba(32,58,67,0.25);
     }
-  
-    .success-box {
-        background: linear-gradient(90deg, #56ab2f 0%, #a8e6cf 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        color: white;
-        margin: 1rem 0;
+    .success-box, .info-box, .alert-box {
+        border-radius: 12px;
+        padding: 0.9rem 1.1rem;
+        margin: 0.8rem 0;
+        color: #ffffff;
     }
-  
-    .info-box {
-        background: linear-gradient(90deg, #3498db 0%, #85c1e9 100%);
-        padding: 1rem;
-        border-radius: 8px;
-        color: white;
-        margin: 1rem 0;
+    .success-box { background: linear-gradient(120deg, #11998e 0%, #38ef7d 100%); }
+    .info-box { background: linear-gradient(120deg, #396afc 0%, #2948ff 100%); }
+    .alert-box { background: linear-gradient(120deg, #ff512f 0%, #dd2476 100%); }
+    @media (max-width: 768px) {
+        .main-header { padding: 1.5rem; }
+        .summary-bar { flex-direction: column; }
+        .summary-chip { width: 100%; }
+        .stTabs [role="tablist"] > div { font-size: 0.85rem; }
     }
 </style>
+""", unsafe_allow_html=True)
+
+MAX_DIAGNOSTIC_ENTRIES = 8
+
+
+def log_diagnostic_event(label, status, detail):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    entry = {
+        "label": label,
+        "status": status,
+        "detail": detail,
+        "time": timestamp,
+    }
+    st.session_state.diagnostics.insert(0, entry)
+    st.session_state.diagnostics = st.session_state.diagnostics[:MAX_DIAGNOSTIC_ENTRIES]
+
+
+def render_summary_bar(container):
+    metrics = st.session_state.summary_metrics
+    container.markdown(f"""
+        <div class="summary-bar">
+            <div class="summary-chip">
+                <h4>DOC</h4>
+                <p>{metrics.get('doc', 'All Offices')}</p>
+            </div>
+            <div class="summary-chip">
+                <h4>Total Vessels</h4>
+                <p>{metrics.get('total', 0)}</p>
+            </div>
+            <div class="summary-chip">
+                <h4>Filtered</h4>
+                <p>{metrics.get('filtered', 0)}</p>
+            </div>
+            <div class="summary-chip">
+                <h4>Selected</h4>
+                <p>{metrics.get('selected', 0)}</p>
+            </div>
+        </div>
 """, unsafe_allow_html=True)
 
 # Initialize session state
@@ -105,6 +182,23 @@ if 'search_query' not in st.session_state:
 
 if 'report_months' not in st.session_state:
     st.session_state.report_months = 2
+
+if 'selected_office' not in st.session_state:
+    st.session_state.selected_office = "All Offices"
+
+if 'diagnostics' not in st.session_state:
+    st.session_state.diagnostics = []
+
+if 'summary_metrics' not in st.session_state:
+    st.session_state.summary_metrics = {
+        "doc": "All Offices",
+        "total": 0,
+        "filtered": 0,
+        "selected": 0,
+    }
+
+if 'checkbox_version' not in st.session_state:
+    st.session_state.checkbox_version = 0
 
 # Enhanced Lambda Invocation Helper
 def invoke_lambda_function_url(lambda_url, payload, timeout=60):
@@ -125,47 +219,92 @@ def invoke_lambda_function_url(lambda_url, payload, timeout=60):
 
         if response.status_code != 200:
             st.error(f"HTTP error: {response.status_code} {response.reason} for url: {lambda_url}")
+            log_diagnostic_event("HTTP Error", "error", f"{response.status_code} {response.reason}")
             return None
 
         result = response.json()
         st.success(f"✅ Data retrieved in {response_time:.2f}s")
+        log_diagnostic_event("Lambda Query", "success", f"{response_time:.2f}s")
         return result
 
     except requests.exceptions.HTTPError as http_err:
         st.error(f"HTTP error: {http_err}")
+        log_diagnostic_event("HTTP Error", "error", str(http_err))
         return None
     except requests.exceptions.ConnectionError as conn_err:
         st.error(f"Connection error: {conn_err}")
+        log_diagnostic_event("Connection Error", "error", str(conn_err))
         return None
     except requests.exceptions.Timeout as timeout_err:
         st.error(f"Timeout error: {timeout_err}")
+        log_diagnostic_event("Timeout", "error", str(timeout_err))
         return None
     except requests.exceptions.RequestException as req_err:
         st.error(f"Request error: {req_err}")
+        log_diagnostic_event("Request Error", "error", str(req_err))
         return None
     except Exception as e:
         st.error(f"Unexpected error: {str(e)}")
+        log_diagnostic_event("Unexpected Error", "error", str(e))
         return None
 
 # Cached vessel loading function
 @st.cache_data(ttl=3600)
-def fetch_all_vessels(lambda_url):
-    """Fetch vessel names from Lambda function with a limit of 1200."""
-    query = "SELECT vessel_name FROM vessel_particulars ORDER BY vessel_name LIMIT 1200"
-  
-    result = invoke_lambda_function_url(lambda_url, {"sql_query": query})
-  
-    if result:
-        extracted_vessel_names = []
-        for item in result:
-            if isinstance(item, dict) and 'vessel_name' in item:
-                extracted_vessel_names.append(item['vessel_name'])
-            elif isinstance(item, str):
-                extracted_vessel_names.append(item)
-        extracted_vessel_names.sort()
-        return extracted_vessel_names
-  
-    return []
+def fetch_vessel_directory(lambda_url):
+    """Fetch vessel names with office information."""
+    office_query = """
+        SELECT 
+            vessel_name, 
+            COALESCE(office_doc, 'Unassigned DOC') AS office
+        FROM vessel_particulars
+        WHERE vessel_name IS NOT NULL
+        ORDER BY office, vessel_name
+        LIMIT 1200
+    """
+
+    result = invoke_lambda_function_url(lambda_url, {"sql_query": office_query})
+
+    # Fallback: if office column is unavailable, retry with legacy query
+    if not result:
+        return []
+    if isinstance(result, dict) and result.get("error"):
+        return fallback_vessel_directory(lambda_url)
+    if isinstance(result, list) and result and isinstance(result[0], dict) and "office" not in result[0]:
+        return fallback_vessel_directory(lambda_url)
+
+    cleaned_records = []
+    for item in result:
+        if isinstance(item, dict):
+            vessel = item.get('vessel_name')
+            office = item.get('office') or "Unassigned DOC"
+        else:
+            vessel = item[0] if isinstance(item, (list, tuple)) and item else None
+            office = item[1] if isinstance(item, (list, tuple)) and len(item) > 1 else "Unassigned DOC"
+        if vessel:
+            cleaned_records.append({"vessel_name": vessel, "office": office})
+
+    return cleaned_records
+
+
+def fallback_vessel_directory(lambda_url):
+    """Legacy loader when office column is unavailable."""
+    legacy_query = "SELECT vessel_name FROM vessel_particulars ORDER BY vessel_name LIMIT 1200"
+    result = invoke_lambda_function_url(lambda_url, {"sql_query": legacy_query})
+    if not result:
+        st.warning("DOC column not available; falling back to basic vessel list.")
+        return []
+    cleaned_records = []
+    for item in result:
+        vessel = None
+        if isinstance(item, dict) and 'vessel_name' in item:
+            vessel = item['vessel_name']
+        elif isinstance(item, str):
+            vessel = item
+        elif isinstance(item, (list, tuple)) and item:
+            vessel = item[0]
+        if vessel:
+            cleaned_records.append({"vessel_name": vessel, "office": "Unassigned DOC"})
+    return cleaned_records
 
 def filter_vessels_client_side(vessels, search_term):
     """Filter vessels on client side for better responsiveness."""
@@ -213,11 +352,13 @@ def query_report_data(lambda_url, vessel_names, num_months):
         
         target_month_last_day = next_month_first - timedelta(days=1)
 
-        hull_date_str = target_month_last_day.strftime("%Y-%m-%d")
+        hull_date_str_start = target_month_first_day.strftime("%Y-%m-%d")
+        hull_date_str_end = target_month_last_day.strftime("%Y-%m-%d")
         hull_col_name = f"Hull Condition {target_month_last_day.strftime('%b %y')}"
         hull_power_loss_col_name = f"Hull Roughness Power Loss % {target_month_last_day.strftime('%b %y')}"
         hull_dates_info.append({
-            'date_str': hull_date_str,
+            'date_str_start': hull_date_str_start,
+            'date_str_end': hull_date_str_end,
             'col_name': hull_col_name,
             'power_loss_col_name': hull_power_loss_col_name,
             'months_back': months_back
@@ -258,16 +399,17 @@ def query_report_data(lambda_url, vessel_names, num_months):
 
         batch_queries = []
 
-        # Hull Roughness queries
+        # Hull Roughness queries - get most recent data within the target month
         for hull_info in hull_dates_info:
             batch_queries.append((hull_info['power_loss_col_name'], f"""
 SELECT vessel_name, hull_rough_power_loss_pct_ed
 FROM (
     SELECT vessel_name, hull_rough_power_loss_pct_ed,
-           ROW_NUMBER() OVER (PARTITION BY vessel_name, CAST(updated_ts AS DATE) ORDER BY updated_ts DESC) as rn
+           ROW_NUMBER() OVER (PARTITION BY vessel_name ORDER BY updated_ts DESC) as rn
     FROM hull_performance_six_months_daily
     WHERE vessel_name IN ({vessel_names_list_str})
-    AND CAST(updated_ts AS DATE) = '{hull_info['date_str']}'
+    AND CAST(updated_ts AS DATE) >= '{hull_info['date_str_start']}'
+    AND CAST(updated_ts AS DATE) <= '{hull_info['date_str_end']}'
 ) AS subquery
 WHERE rn = 1
 """, all_hull_data_by_month[hull_info['power_loss_col_name']]))
@@ -933,25 +1075,71 @@ def main():
     # Reset button with enhanced styling
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🔄 Reset All", type="secondary", use_container_width=True):
+        if st.button("🔄 Reset All", type="secondary"):
             reset_page()
 
-    # Section 1: Vessel Selection
-    st.markdown('<div class="section-header">1. 🎯 Select Vessels</div>', unsafe_allow_html=True)
-
-    # Load vessels
+    # Load vessels with office mapping
     with st.spinner("Loading vessels..."):
         try:
-            all_vessels = fetch_all_vessels(LAMBDA_FUNCTION_URL)
+            vessel_directory = fetch_vessel_directory(LAMBDA_FUNCTION_URL)
+            all_vessels = [record["vessel_name"] for record in vessel_directory]
+            vessel_office_lookup = {record["vessel_name"]: record["office"] for record in vessel_directory}
+            office_to_vessels = defaultdict(list)
+            for record in vessel_directory:
+                office_to_vessels[record["office"]].append(record["vessel_name"])
+            office_options = ["All Offices"] + sorted(office_to_vessels.keys())
             st.markdown(f'<div class="success-box">✅ Successfully loaded {len(all_vessels)} vessels!</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"❌ Failed to load vessels: {str(e)}")
+            vessel_directory = []
             all_vessels = []
+            vessel_office_lookup = {}
+            office_to_vessels = defaultdict(list)
+            office_options = ["All Offices"]
 
-    if all_vessels:
-        # Enhanced search with better styling
+    summary_placeholder = st.container()
+    selection_tab, report_tab, analytics_tab, guide_tab = st.tabs(
+        ["🎯 DOC & Selection", "🚀 Reports", "📊 Analytics", "📖 Guide"]
+    )
+
+    if not all_vessels:
+        with selection_tab:
+            st.error("❌ Failed to load vessels. Please check your connection and try again.")
+        with report_tab:
+            st.info("Load vessels in the DOC tab to generate a report.")
+        with analytics_tab:
+            st.info("Analytics will appear once a report is generated.")
+        with guide_tab:
+            st.info("Refer to the documentation below.")
+        return
+
+    # --- Selection Tab ---
+    with selection_tab:
+        st.markdown('<div class="section-header">🎯 DOC & Vessel Selection</div>', unsafe_allow_html=True)
+
+        if st.session_state.selected_office not in office_options:
+            st.session_state.selected_office = "All Offices"
+
+        office_col1, office_col2 = st.columns([3, 1])
+        with office_col1:
+            selected_office = st.selectbox(
+                "🏢 Choose DOC",
+                office_options,
+                index=office_options.index(st.session_state.selected_office),
+                help="Selecting a DOC auto-selects every vessel under it.",
+            )
+        with office_col2:
+            office_count = len(office_to_vessels.get(selected_office, all_vessels)) if selected_office != "All Offices" else len(all_vessels)
+            st.metric("DOC Vessels", office_count)
+
+        if selected_office != st.session_state.selected_office:
+            st.session_state.selected_office = selected_office
+            if selected_office != "All Offices":
+                st.session_state.selected_vessels = set(office_to_vessels.get(selected_office, []))
+            st.session_state.checkbox_version += 1
+
         search_query = st.text_input(
-            "🔍 Search vessels:",
+            "🔍 Search vessels",
             value=st.session_state.search_query,
             placeholder="Type vessel name to filter...",
             help="Start typing to filter the vessel list in real-time"
@@ -960,28 +1148,25 @@ def main():
         if search_query != st.session_state.search_query:
             st.session_state.search_query = search_query
 
-        # Filter vessels
-        filtered_vessels = filter_vessels_client_side(all_vessels, search_query)
+        base_pool = office_to_vessels.get(selected_office, all_vessels) if selected_office != "All Offices" else all_vessels
+        filtered_vessels = filter_vessels_client_side(base_pool, search_query)
 
-        # Enhanced metrics display
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        with metric_col1:
             st.markdown(f"""
             <div class="metric-card">
                 <h3>📊 Total Vessels</h3>
                 <h2>{len(all_vessels)}</h2>
             </div>
             """, unsafe_allow_html=True)
-      
-        with col2:
+        with metric_col2:
             st.markdown(f"""
             <div class="metric-card">
                 <h3>🔍 Filtered</h3>
                 <h2>{len(filtered_vessels)}</h2>
             </div>
             """, unsafe_allow_html=True)
-      
-        with col3:
+        with metric_col3:
             st.markdown(f"""
             <div class="metric-card">
                 <h3>✅ Selected</h3>
@@ -989,17 +1174,16 @@ def main():
             </div>
             """, unsafe_allow_html=True)
 
-        # Vessel selection with improved UI
         if filtered_vessels:
-            st.subheader("Select Vessels:")
-            with st.container(height=300, border=True):
+            st.subheader("Select Vessels")
+            with st.container(height=320, border=True):
                 cols = st.columns(3)
                 for i, vessel in enumerate(filtered_vessels):
                     col_idx = i % 3
                     checkbox_state = cols[col_idx].checkbox(
-                        vessel,
+                        f"{vessel} ({vessel_office_lookup.get(vessel, 'Unassigned DOC')})",
                         value=(vessel in st.session_state.selected_vessels),
-                        key=f"checkbox_{vessel}"
+                        key=f"checkbox_{st.session_state.checkbox_version}_{vessel}"
                     )
                     if checkbox_state:
                         st.session_state.selected_vessels.add(vessel)
@@ -1010,35 +1194,46 @@ def main():
             st.markdown('<div class="info-box">🔍 No vessels match your search criteria</div>', unsafe_allow_html=True)
 
         selected_vessels_list = list(st.session_state.selected_vessels)
-
-        # Enhanced selected vessels display
         if selected_vessels_list:
             with st.expander(f"📋 Selected Vessels ({len(selected_vessels_list)})", expanded=False):
                 for i, vessel in enumerate(sorted(selected_vessels_list), 1):
                     st.write(f"{i}. {vessel}")
-    else:
-        st.error("❌ Failed to load vessels. Please check your connection and try again.")
-        selected_vessels_list = []
 
-    # Section 2: Report Generation
-    st.markdown('<div class="section-header">2. 🚀 Generate Performance Report</div>', unsafe_allow_html=True)
+        with st.expander("🩺 Diagnostics", expanded=False):
+            if not st.session_state.diagnostics:
+                st.caption("No diagnostics recorded yet.")
+            else:
+                for entry in st.session_state.diagnostics:
+                    status_emoji = "✅" if entry["status"] == "success" else "⚠️"
+                    st.write(f"{status_emoji} [{entry['time']}] **{entry['label']}** — {entry['detail']}")
+
+        st.session_state.summary_metrics = {
+            "doc": selected_office,
+            "total": len(all_vessels),
+            "filtered": len(filtered_vessels),
+            "selected": len(st.session_state.selected_vessels),
+        }
+        render_summary_bar(summary_placeholder)
+
+    selected_vessels_list = list(st.session_state.selected_vessels)
 
     # Enhanced report duration selection
     st.subheader("📅 Select Report Duration:")
     st.session_state.report_months = st.radio(
-        "",
+        "Report Duration",
         options=[1, 2, 3],
         format_func=lambda x: f"📊 {x} Month{'s' if x > 1 else ''} Analysis",
         index=1,
         horizontal=True,
-        help="Choose the number of months for historical analysis"
+        help="Choose the number of months for historical analysis",
+        label_visibility="collapsed"
     )
 
     if selected_vessels_list:
         # Enhanced generate button
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("🚀 Generate Performance Report", type="primary", use_container_width=True):
+            if st.button("🚀 Generate Performance Report", type="primary"):
                 with st.spinner("Generating comprehensive report with advanced analytics..."):
                     try:
                         start_time = time.time()
@@ -1066,7 +1261,7 @@ def main():
         # Enhanced report display
         st.subheader("📋 Performance Data Table")
         styled_df = st.session_state.report_data.style.apply(style_condition_columns, axis=1)
-        st.dataframe(styled_df, use_container_width=True, height=400)
+        st.dataframe(styled_df, height=400, width="stretch")
 
         # Enhanced download section
         st.subheader("📥 Download Options")
@@ -1084,7 +1279,6 @@ def main():
                         data=excel_data,
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
                     )
             except Exception as e:
                 st.error(f"❌ Error creating Excel file: {str(e)}")
@@ -1097,7 +1291,6 @@ def main():
                 data=csv_data,
                 file_name=csv_filename,
                 mime="text/csv",
-                use_container_width=True
             )
 
         with col3:
@@ -1112,7 +1305,6 @@ def main():
                             data=word_data,
                             file_name=word_filename,
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            use_container_width=True
                         )
                     else:
                         st.error("❌ Failed to create Word report")
@@ -1134,7 +1326,7 @@ def main():
                     with col1:
                         latest_hull_data = st.session_state.report_data[hull_cols[0]].value_counts()
                         if len(latest_hull_data) > 0:
-                            st.bar_chart(latest_hull_data, use_container_width=True)
+                            st.bar_chart(latest_hull_data, width="stretch")
                             st.caption(f"Distribution for {hull_cols[0]}")
 
                     with col2:
@@ -1152,7 +1344,7 @@ def main():
                       
                         if hull_summary:
                             hull_summary_df = pd.DataFrame(hull_summary)
-                            st.dataframe(hull_summary_df, use_container_width=True)
+                            st.dataframe(hull_summary_df, width="stretch")
 
             with tab2:
                 st.subheader("ME Efficiency Distribution")
@@ -1163,7 +1355,7 @@ def main():
                     with col1:
                         latest_me_data = st.session_state.report_data[me_cols[0]].value_counts()
                         if len(latest_me_data) > 0:
-                            st.bar_chart(latest_me_data, use_container_width=True)
+                            st.bar_chart(latest_me_data, width="stretch")
                             st.caption(f"Distribution for {me_cols[0]}")
 
                     with col2:
@@ -1182,7 +1374,7 @@ def main():
                       
                         if me_summary:
                             me_summary_df = pd.DataFrame(me_summary)
-                            st.dataframe(me_summary_df, use_container_width=True)
+                            st.dataframe(me_summary_df, width="stretch")
 
             with tab3:
                 st.subheader("Performance Trends")
@@ -1205,7 +1397,7 @@ def main():
                     if hull_trend_data:
                         hull_trend_df = pd.DataFrame(hull_trend_data)
                         if hull_trend_df["Good %"].sum() > 0:
-                            st.line_chart(hull_trend_df.set_index("Month"), use_container_width=True)
+                            st.line_chart(hull_trend_df.set_index("Month"), width="stretch")
 
                 if len(me_cols) >= 2:
                     st.write("**ME Efficiency Trends (% Good)**")
@@ -1222,7 +1414,7 @@ def main():
                     if me_trend_data:
                         me_trend_df = pd.DataFrame(me_trend_data)
                         if me_trend_df["Good %"].sum() > 0:
-                            st.line_chart(me_trend_df.set_index("Month"), use_container_width=True)
+                            st.line_chart(me_trend_df.set_index("Month"), width="stretch")
 
             with tab4:
                 st.subheader("CII Rating Distribution")
@@ -1231,7 +1423,7 @@ def main():
                     with col1:
                         cii_data = st.session_state.report_data['YTD CII'].value_counts()
                         if len(cii_data) > 0:
-                            st.bar_chart(cii_data, use_container_width=True)
+                            st.bar_chart(cii_data, width="stretch")
                             st.caption("CII Rating Distribution")
 
                     with col2:
@@ -1260,7 +1452,7 @@ def main():
                         
                         if cii_summary:
                             cii_summary_df = pd.DataFrame(cii_summary)
-                            st.dataframe(cii_summary_df, use_container_width=True)
+                            st.dataframe(cii_summary_df, width="stretch")
                 else:
                     st.info("No CII data available for analysis")
 
