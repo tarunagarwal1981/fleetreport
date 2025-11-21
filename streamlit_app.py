@@ -691,7 +691,9 @@ def create_excel_download_with_styling(df, filename):
     # Write data and apply styling
     for row_idx, row_data in df.iterrows():
         for col_idx, (col_name, cell_value) in enumerate(row_data.items(), 1):
-            cell = ws.cell(row=row_idx + 2, column=col_idx, value=cell_value)
+            # Convert pandas NA to None for Excel compatibility
+            excel_value = None if pd.isna(cell_value) else cell_value
+            cell = ws.cell(row=row_idx + 2, column=col_idx, value=excel_value)
             cell.alignment = Alignment(wrap_text=True, vertical='top')
 
             if 'Hull Condition' in col_name and 'Power Loss' not in col_name:
